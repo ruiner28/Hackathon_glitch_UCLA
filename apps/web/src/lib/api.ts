@@ -1,4 +1,4 @@
-const API_BASE =
+export const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 async function request<T>(
@@ -130,6 +130,7 @@ export async function getLessonScenes(lessonId: string) {
       status: string;
       created_at: string;
       updated_at: string;
+      preview_image_url?: string | null;
     }>
   >(`/api/lessons/${lessonId}/scenes`);
 }
@@ -140,6 +141,8 @@ export async function updateScene(
     narration_text?: string;
     on_screen_text?: string[];
     duration_sec?: number;
+    veo_eligible?: boolean;
+    render_mode?: "auto" | "force_static" | "force_veo";
   }
 ) {
   return request(`/api/scenes/${sceneId}`, {

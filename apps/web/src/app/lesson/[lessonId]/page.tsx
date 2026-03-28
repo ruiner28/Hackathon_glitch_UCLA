@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { SceneCard } from "@/components/lesson/scene-card";
 import { SceneEditor } from "@/components/lesson/scene-editor";
 import {
+  API_BASE,
   getLesson,
   getLessonScenes,
   updateScene,
@@ -15,11 +16,11 @@ import {
   regenerateSceneAssets,
   reorderScenes,
   updateLessonStyle,
-  toggleSceneVeo,
   triggerRenderFinal,
 } from "@/lib/api";
 import { useLessonStore } from "@/hooks/useLesson";
-import type { Scene, Lesson } from "@/types";
+import { sceneWillUseVeo } from "@/lib/scene-spec";
+import type { Scene, Lesson, SceneRenderMode } from "@/types";
 import {
   Loader2,
   Film,
@@ -133,16 +134,19 @@ export default function LessonEditorPage({
     }
   }
 
-  const handleToggleVeo = useCallback(async (enabled: boolean) => {
-    if (!selectedScene) return;
-    try {
-      await toggleSceneVeo(selectedScene.id, enabled);
-      const updatedScenes = await getLessonScenes(lessonId);
-      setScenes(updatedScenes as unknown as Scene[]);
-    } catch (err) {
-      console.error("Failed to toggle Veo:", err);
-    }
-  }, [selectedScene, lessonId, setScenes]);
+  const handleRenderModeChange = useCallback(
+    async (mode: SceneRenderMode) => {
+      if (!selectedScene) return;
+      try {
+        await updateScene(selectedScene.id, { render_mode: mode });
+        const updatedScenes = await getLessonScenes(lessonId);
+        setScenes(updatedScenes as unknown as Scene[]);
+      } catch (err) {
+        console.error("Failed to update motion mode:", err);
+      }
+    },
+    [selectedScene, lessonId, setScenes]
+  );
 
   async function handleMoveScene(direction: "up" | "down") {
     if (!selectedScene) return;
@@ -297,12 +301,23 @@ export default function LessonEditorPage({
           {/* Center - Preview */}
           <div className="flex-1 overflow-y-auto">
             <div className="p-6">
-              <div className="aspect-video rounded-lg bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center mb-6 shadow-inner">
-                <div className="text-center">
+              <div className="aspect-video rounded-lg bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center mb-6 shadow-inner overflow-hidden relative">
+                {selectedScene?.preview_image_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={`${API_BASE.replace(/\/$/, "")}${selectedScene.preview_image_url}`}
+                    alt=""
+                    className="absolute inset-0 h-full w-full object-cover object-center opacity-90"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                    }}
+                  />
+                ) : null}
+                <div className="text-center relative z-10 px-4">
                   <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-white/10">
                     <Play className="h-8 w-8 text-white/80" />
                   </div>
-                  <p className="text-sm text-white/60">
+                  <p className="text-sm text-white/90 drop-shadow">
                     {selectedScene
                       ? `Scene ${selectedScene.scene_order + 1}: ${selectedScene.title}`
                       : "Select a scene to preview"}
@@ -321,15 +336,41 @@ export default function LessonEditorPage({
                       <span className="text-muted-foreground">Render Strategy</span>
                       <span>{selectedScene.render_strategy}</span>
                     </div>
-                    {!!(selectedScene.scene_spec_json?.veo_eligible) && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-muted-foreground flex items-center gap-1">
-                          <Clapperboard className="h-3.5 w-3.5" />
-                          Veo Motion
-                        </span>
-                        <Badge variant="default" className="bg-violet-600 text-white text-[10px]">
-                          Score {((selectedScene.scene_spec_json?.veo_score as number) ?? 0).toFixed(1)} — 5s clip
-                        </Badge>
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground flex items-center gap-1">
+                        <Clapperboard className="h-3.5 w-3.5" />
+                        Motion
+                      </span>
+                      <Badge
+                        variant="outline"
+                        className={
+                          sceneWillUseVeo(selectedScene)
+                            ? "border-violet-400 text-violet-700 text-[10px]"
+                            : "text-[10px]"
+                        }
+                      >
+                        {sceneWillUseVeo(selectedScene)
+                          ? `Veo ${((selectedScene.scene_spec_json?.veo_score as number) ?? 0).toFixed(1)} · 3–5s`
+                          : "Static keyframe"}
+                      </Badge>
+                    </div>
+                    {Boolean(
+                      selectedScene.scene_spec_json?.continuity_anchor ||
+                        selectedScene.scene_spec_json?.transition_note
+                    ) && (
+                      <div className="text-xs border-t pt-2 mt-2 space-y-1">
+                        {!!selectedScene.scene_spec_json?.continuity_anchor && (
+                          <p>
+                            <span className="text-muted-foreground">Anchor: </span>
+                            {String(selectedScene.scene_spec_json.continuity_anchor)}
+                          </p>
+                        )}
+                        {!!selectedScene.scene_spec_json?.transition_note && (
+                          <p>
+                            <span className="text-muted-foreground">Bridge: </span>
+                            {String(selectedScene.scene_spec_json.transition_note)}
+                          </p>
+                        )}
                       </div>
                     )}
                     <div className="flex justify-between">
@@ -404,7 +445,7 @@ export default function LessonEditorPage({
                   onSave={handleSaveScene}
                   onRegenerate={handleRegenerateScene}
                   onRegenerateAssets={handleRegenerateAssets}
-                  onToggleVeo={handleToggleVeo}
+                  onRenderModeChange={handleRenderModeChange}
                   isSaving={isSaving}
                   isRegenerating={isRegenerating}
                   isRegeneratingAssets={isRegeneratingAssets}

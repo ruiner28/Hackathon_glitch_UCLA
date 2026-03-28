@@ -1,0 +1,119 @@
+1
+00:00:03,000 --> 00:00:07,900
+Imagine a bustling city intersection where two cars approach from opposite directions, both needing to turn left. Each
+
+2
+00:00:08,000 --> 00:00:12,900
+car is waiting for the other to move, but neither can proceed because they are mutually blocking each other. This
+
+3
+00:00:13,000 --> 00:00:17,899
+endless wait, a complete standstill, is analogous to an OS Deadlock, where processes get stuck waiting for resources
+
+4
+00:00:18,000 --> 00:00:22,899
+held by others.
+
+5
+00:00:24,500 --> 00:00:30,149
+For a deadlock to grip an operating system, four specific conditions must all be present simultaneously. These are:
+
+6
+00:00:30,250 --> 00:00:35,899
+Mutual Exclusion, meaning resources cannot be shared; Hold and Wait, where a process holds resources while waiting for
+
+7
+00:00:36,000 --> 00:00:41,649
+more; No Preemption, implying resources cannot be forcibly taken; and finally, Circular Wait, forming a closed loop of
+
+8
+00:00:41,750 --> 00:00:47,399
+dependencies.
+
+9
+00:00:49,000 --> 00:00:57,566
+Consider two processes, P1 and P2, needing exclusive access to Printer A (R1) and Scanner B (R2). P1 first acquires
+
+10
+00:00:57,666 --> 00:01:06,233
+Printer A, demonstrating mutual exclusion. Now P1 needs Scanner B, but P2 has already acquired it. P1 now exemplifies
+
+11
+00:01:06,333 --> 00:01:14,900
+'hold and wait': holding Printer A while waiting for Scanner B, which is currently unavailable.
+
+12
+00:01:16,500 --> 00:01:22,900
+In our scenario, Scanner B cannot be forcibly taken from P2 to give to P1; P2 must voluntarily release it – this is 'No
+
+13
+00:01:23,000 --> 00:01:29,400
+Preemption'. With P1 holding Printer A and waiting for Scanner B, and P2 holding Scanner B and waiting for Printer A, we
+
+14
+00:01:29,500 --> 00:01:35,900
+see a 'Circular Wait'. Each process in the chain is waiting for a resource held by the next, creating an unbreakable
+
+15
+00:01:36,000 --> 00:01:42,400
+dependency loop.
+
+16
+00:01:44,000 --> 00:01:51,566
+To formally detect deadlock, we use Resource-Allocation Graphs. Processes are circles, resources are squares. An arrow
+
+17
+00:01:51,666 --> 00:01:59,233
+from a process to a resource means a request; an arrow from a resource to a process means it's assigned. When a cycle
+
+18
+00:01:59,333 --> 00:02:06,900
+forms in this graph, like P1 requesting R2 which P2 holds, and P2 requesting R1 which P1 holds, it signals a deadlock.
+
+19
+00:02:08,500 --> 00:02:12,650
+Operating systems employ various strategies to manage deadlocks. We can try to prevent them by negating one of the four
+
+20
+00:02:12,750 --> 00:02:16,900
+conditions, or use avoidance algorithms to ensure we never enter an unsafe state. If deadlocks are allowed, we need
+
+21
+00:02:17,000 --> 00:02:21,150
+detection mechanisms to find them, followed by recovery procedures to break them. Each approach has its own complexities
+
+22
+00:02:21,250 --> 00:02:25,400
+and performance implications.
+
+23
+00:02:27,000 --> 00:02:31,900
+Deadlock Prevention proactively blocks one of the four conditions, perhaps by enforcing resource preemption or by
+
+24
+00:02:32,000 --> 00:02:36,900
+requiring processes to request all resources at once. Deadlock Avoidance, on the other hand, dynamically decides whether
+
+25
+00:02:37,000 --> 00:02:41,900
+to grant a resource request. It uses information about future resource needs to ensure that granting a request will not
+
+26
+00:02:42,000 --> 00:02:46,900
+lead the system into an unsafe state, like the Banker's Algorithm does.
+
+27
+00:02:48,500 --> 00:02:54,150
+When deadlocks are allowed to occur, the system relies on detection algorithms, often periodically analyzing
+
+28
+00:02:54,250 --> 00:02:59,900
+resource-allocation graphs, to identify them. Once a deadlock is confirmed, recovery measures are initiated. These might
+
+29
+00:03:00,000 --> 00:03:05,650
+involve terminating one or more deadlocked processes, or preempting resources from a process to break the circular wait.
+
+30
+00:03:05,750 --> 00:03:11,400
+Both detection and recovery come with significant performance overhead and potential data loss.

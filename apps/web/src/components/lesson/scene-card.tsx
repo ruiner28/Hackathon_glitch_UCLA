@@ -1,7 +1,9 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { Clock, Clapperboard } from "lucide-react";
+import { API_BASE } from "@/lib/api";
+import { sceneWillUseVeo } from "@/lib/scene-spec";
+import { Clock, Clapperboard, ImageIcon } from "lucide-react";
 import type { Scene } from "@/types";
 
 const sceneTypeColors: Record<string, string> = {
@@ -28,9 +30,25 @@ interface SceneCardProps {
   onClick: () => void;
 }
 
+const STYLE_LABELS: Record<string, string> = {
+  clean_academic: "Academic",
+  modern_technical: "Technical",
+  cinematic_minimal: "Cinematic",
+};
+
 export function SceneCard({ scene, isSelected, onClick }: SceneCardProps) {
   const colorClass =
     sceneTypeColors[scene.scene_type] || "bg-gray-100 text-gray-800";
+
+  const sp = scene.scene_spec_json?.style_preset;
+  const styleKey = typeof sp === "string" ? sp : "";
+  const styleShort = styleKey
+    ? STYLE_LABELS[styleKey] || styleKey
+    : null;
+  const thumb =
+    scene.preview_image_url &&
+    `${API_BASE.replace(/\/$/, "")}${scene.preview_image_url.startsWith("/") ? "" : "/"}${scene.preview_image_url}`;
+  const useVeo = sceneWillUseVeo(scene);
 
   return (
     <button
@@ -42,36 +60,74 @@ export function SceneCard({ scene, isSelected, onClick }: SceneCardProps) {
           : "border-border hover:border-primary/30"
       )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
-            {scene.scene_order + 1}
-          </span>
-          <span className="text-sm font-medium line-clamp-1">
-            {scene.title}
-          </span>
-        </div>
-      </div>
-
-      <div className="mt-2 flex items-center gap-2">
-        <span
-          className={cn(
-            "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-            colorClass
-          )}
-        >
-          {sceneTypeLabels[scene.scene_type] || scene.scene_type}
-        </span>
-        {!!(scene.scene_spec_json?.veo_eligible) && (
-          <span className="inline-flex items-center gap-0.5 rounded-full bg-violet-100 text-violet-700 px-1.5 py-0.5 text-[10px] font-medium">
-            <Clapperboard className="h-2.5 w-2.5" />
-            Veo
-          </span>
+      <div className="flex gap-2">
+        {thumb ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={thumb}
+            alt=""
+            className="h-14 w-24 shrink-0 rounded object-cover bg-muted"
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = "none";
+            }}
+          />
+        ) : (
+          <div className="flex h-14 w-24 shrink-0 items-center justify-center rounded bg-muted text-muted-foreground">
+            <ImageIcon className="h-5 w-5" />
+          </div>
         )}
-        <span className="flex items-center gap-1 text-xs text-muted-foreground">
-          <Clock className="h-3 w-3" />
-          {scene.duration_sec}s
-        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
+                {scene.scene_order + 1}
+              </span>
+              <span className="text-sm font-medium line-clamp-2">
+                {scene.title}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                colorClass
+              )}
+            >
+              {sceneTypeLabels[scene.scene_type] || scene.scene_type}
+            </span>
+            {styleShort && (
+              <span className="inline-flex rounded-full bg-slate-100 text-slate-700 px-1.5 py-0.5 text-[10px] font-medium">
+                {styleShort}
+              </span>
+            )}
+            <span
+              className={cn(
+                "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                useVeo
+                  ? "bg-violet-100 text-violet-700"
+                  : "bg-stone-100 text-stone-600"
+              )}
+            >
+              {useVeo ? (
+                <>
+                  <Clapperboard className="h-2.5 w-2.5" />
+                  Veo
+                </>
+              ) : (
+                <>
+                  <ImageIcon className="h-2.5 w-2.5" />
+                  Static
+                </>
+              )}
+            </span>
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Clock className="h-3 w-3" />
+              {scene.duration_sec}s
+            </span>
+          </div>
+        </div>
       </div>
 
       {scene.narration_text && (

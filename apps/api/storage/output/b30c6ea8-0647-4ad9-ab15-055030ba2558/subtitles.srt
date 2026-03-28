@@ -1,0 +1,143 @@
+1
+00:00:03,000 --> 00:00:07,700
+Before the Transformer, sequence models like Recurrent Neural Networks processed information sequentially, creating
+
+2
+00:00:07,799 --> 00:00:12,500
+bottlenecks for long sequences and hindering parallelization. While Convolutional Networks offered some parallel
+
+3
+00:00:12,599 --> 00:00:17,299
+computation, they struggled with capturing long-range dependencies efficiently. The groundbreaking 'Attention Is All You
+
+4
+00:00:17,399 --> 00:00:22,099
+Need' paper introduced the Transformer, a novel architecture that entirely removed recurrence and convolutions. This
+
+5
+00:00:22,199 --> 00:00:26,899
+model aimed to boost training speed and handle distant relationships by relying solely on attention mechanisms.
+
+6
+00:00:28,500 --> 00:00:33,649
+At its core, attention is a mechanism that allows a model to weigh the importance of different parts of the input
+
+7
+00:00:33,750 --> 00:00:38,899
+sequence when processing each element. It functions by mapping a 'query' to a set of 'key-value' pairs. The query vector
+
+8
+00:00:39,000 --> 00:00:44,149
+interacts with all key vectors, determining a relevance score for each. These scores are then used to compute a weighted
+
+9
+00:00:44,250 --> 00:00:49,399
+sum of the value vectors, forming the output, allowing the model to focus on pertinent information.
+
+10
+00:00:51,000 --> 00:00:57,100
+The Transformer primarily uses Scaled Dot-Product Attention, where the dot products of queries and keys are scaled by
+
+11
+00:00:57,200 --> 00:01:03,300
+the square root of the key's dimension, before applying a softmax function. This scaling prevents large dot products
+
+12
+00:01:03,399 --> 00:01:09,500
+from leading to vanishing gradients. Multi-Head Attention extends this by running several attention mechanisms in
+
+13
+00:01:09,599 --> 00:01:15,700
+parallel on different linear projections of the input. This enables the model to jointly attend to information from
+
+14
+00:01:15,799 --> 00:01:21,900
+various representation subspaces and different positions, enhancing its ability to capture diverse dependencies.
+
+15
+00:01:23,500 --> 00:01:27,600
+The Transformer's Encoder block is responsible for processing the input sequence into a rich, contextual
+
+16
+00:01:27,700 --> 00:01:31,800
+representation. Each identical encoder layer consists of two main sub-layers: a Multi-Head Self-Attention mechanism,
+
+17
+00:01:31,900 --> 00:01:36,000
+which allows tokens to interact with all other tokens in the input sequence, and a Position-wise Feed-Forward Network.
+
+18
+00:01:36,099 --> 00:01:40,200
+Crucially, each sub-layer employs residual connections followed by layer normalization, aiding in gradient flow and
+
+19
+00:01:40,299 --> 00:01:44,400
+stabilizing training in deep networks.
+
+20
+00:01:46,000 --> 00:01:50,566
+The Decoder block generates the output sequence, one token at a time. It also features identical layers, but with three
+
+21
+00:01:50,666 --> 00:01:55,233
+sub-layers. The first is a Masked Multi-Head Self-Attention, which prevents the decoder from attending to future tokens
+
+22
+00:01:55,333 --> 00:01:59,900
+during training, mimicking inference. The second is an Encoder-Decoder Attention layer, where queries come from the
+
+23
+00:02:00,000 --> 00:02:04,566
+decoder's previous layer, and keys/values come from the encoder's output, enabling the decoder to focus on relevant
+
+24
+00:02:04,666 --> 00:02:09,233
+parts of the input. Finally, a Position-wise Feed-Forward Network processes the combined information before a final
+
+25
+00:02:09,333 --> 00:02:13,900
+softmax layer predicts the next token.
+
+26
+00:02:15,500 --> 00:02:19,599
+Since the Transformer processes all tokens in parallel without recurrence or convolutions, it inherently loses
+
+27
+00:02:19,699 --> 00:02:23,799
+information about the order of the sequence. To compensate, Positional Encodings are added to the input embeddings.
+
+28
+00:02:23,900 --> 00:02:28,000
+These encodings are generated using sine and cosine functions of varying frequencies, allowing the model to
+
+29
+00:02:28,099 --> 00:02:32,199
+differentiate between token positions and learn relative positional relationships. This simple yet ingenious addition
+
+30
+00:02:32,300 --> 00:02:36,400
+provides the necessary sequential context to the attention mechanisms.
+
+31
+00:02:38,000 --> 00:02:43,733
+The Transformer's architecture proved revolutionary, achieving state-of-the-art results on machine translation tasks,
+
+32
+00:02:43,833 --> 00:02:49,566
+significantly outperforming previous recurrent and convolutional models in terms of quality. Its reliance on attention
+
+33
+00:02:49,666 --> 00:02:55,400
+enabled unparalleled parallelization during training, drastically reducing computation time and allowing for larger
+
+34
+00:02:55,500 --> 00:03:01,233
+models. By efficiently capturing long-range dependencies, the Transformer laid the groundwork for countless
+
+35
+00:03:01,333 --> 00:03:07,066
+advancements, becoming the foundational architecture for nearly all modern large language models and a cornerstone of
+
+36
+00:03:07,166 --> 00:03:12,900
+contemporary AI research.

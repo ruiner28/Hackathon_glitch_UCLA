@@ -35,8 +35,17 @@ from app.services.music.service import MusicService
 from app.services.narration.service import NarrationService
 from app.services.planning.service import PlanningService
 from app.services.rendering.service import RenderingService
+from app.services.visual_system.nano_banana_prompt import enrich_image_prompt_from_scene_spec
 
 logger = logging.getLogger(__name__)
+
+
+def _ordered_audio_urls_for_scenes(
+    scenes: list[Scene], audio_rows: list[SceneAsset],
+) -> list[str]:
+    """Map narration assets to scene order (fixes nondeterministic query order)."""
+    by_scene = {str(a.scene_id): a.storage_url for a in audio_rows}
+    return [by_scene.get(str(s.id), "") for s in scenes]
 
 
 class LessonPipeline:
@@ -319,12 +328,25 @@ class LessonPipeline:
         )
         scenes = result.scalars().all()
 
+        from app.services import demo_cache as dc
+
+        slug = dc.resolve_demo_cache_slug(lesson.input_topic)
+        if slug and dc.cache_is_ready_for_assets(slug, len(scenes)):
+            await self._apply_demo_cached_assets(db, lesson, scenes, slug)
+            await db.flush()
+            logger.info(
+                "Pipeline.run_asset_generation: demo cache hit slug=%s lesson=%s",
+                slug,
+                lesson.id,
+            )
+            return
+
         scene_specs = [s.scene_spec_json or {} for s in scenes]
         narrations = await self.narration.generate_all_narrations(
             scene_specs, str(lesson.id)
         )
 
-        for scene, narration_result in zip(scenes, narrations):
+        for scene_idx, (scene, narration_result) in enumerate(zip(scenes, narrations)):
             scene.narration_text = narration_result["narration_text"]
             scene.status = SceneStatus.generating
 
@@ -343,14 +365,22 @@ class LessonPipeline:
 
             spec = scene.scene_spec_json or {}
             generated_image_for_scene = False
+            render_mode = spec.get("render_mode", "auto")
 
             for asset_req in spec.get("asset_requests", []):
                 req_type = asset_req.get("type", "")
                 prompt = asset_req.get("prompt", "")
 
                 if req_type == "image" and prompt:
+                    img_prompt = enrich_image_prompt_from_scene_spec(
+                        spec,
+                        lesson.style_preset.value,
+                        lesson.title,
+                        scene_idx,
+                        len(scenes),
+                    )
                     image_bytes = await self.image_provider.generate_image(
-                        prompt=prompt,
+                        prompt=img_prompt,
                         style=lesson.style_preset.value,
                         width=1920,
                         height=1080,
@@ -365,15 +395,20 @@ class LessonPipeline:
                         provider="image",
                         prompt_version="v1",
                         storage_url=img_url,
-                        metadata_json={"prompt": prompt},
+                        metadata_json={"prompt": img_prompt},
                         status=AssetStatus.ready,
                     ))
                     generated_image_for_scene = True
 
-                elif req_type == "video" and prompt:
-                    max_dur = min(
-                        asset_req.get("max_duration_sec", 5.0),
-                        5.0,
+                elif (
+                    req_type == "video"
+                    and prompt
+                    and spec.get("veo_eligible")
+                    and render_mode != "force_static"
+                ):
+                    max_dur = max(
+                        3.0,
+                        min(asset_req.get("max_duration_sec", 5.0), 5.0),
                     )
                     try:
                         video_bytes = await self.video_provider.generate_from_text(
@@ -408,9 +443,14 @@ class LessonPipeline:
             has_video_asset = any(
                 ar.get("type") == "video" for ar in spec.get("asset_requests", [])
             )
-            if spec.get("veo_eligible") and veo_prompt and not has_video_asset:
+            if (
+                spec.get("veo_eligible")
+                and veo_prompt
+                and not has_video_asset
+                and render_mode != "force_static"
+            ):
                 try:
-                    veo_dur = min(spec.get("duration_sec", 5), 5)
+                    veo_dur = max(3.0, min(spec.get("duration_sec", 5), 5.0))
                     video_bytes = await self.video_provider.generate_from_text(
                         prompt=veo_prompt, duration_sec=veo_dur,
                     )
@@ -434,16 +474,22 @@ class LessonPipeline:
 
             # Fallback: generate image for every scene that didn't get one
             if not generated_image_for_scene:
-                fallback_prompt = spec.get("image_prompt", "")
-                if not fallback_prompt:
+                if not spec.get("image_prompt"):
                     title = spec.get("title", "")
                     narr = spec.get("narration_text", "")
                     scene_type = spec.get("scene_type", "concept")
-                    fallback_prompt = (
+                    spec = {**spec, "image_prompt": (
                         f"Educational {scene_type} diagram for: {title}. "
                         f"Context: {narr[:200]}. "
                         f"Clean technical illustration, labeled components."
-                    )
+                    )}
+                fallback_prompt = enrich_image_prompt_from_scene_spec(
+                    spec,
+                    lesson.style_preset.value,
+                    lesson.title,
+                    scene_idx,
+                    len(scenes),
+                )
                 try:
                     image_bytes = await self.image_provider.generate_image(
                         prompt=fallback_prompt,
@@ -475,6 +521,101 @@ class LessonPipeline:
         logger.info(
             "Pipeline.run_asset_generation: completed for lesson %s", lesson.id
         )
+
+    async def _apply_demo_cached_assets(
+        self,
+        db: AsyncSession,
+        lesson: Lesson,
+        scenes: list[Scene],
+        slug: str,
+    ) -> None:
+        """Copy pre-built images, audio, and optional Veo clips from demo disk cache."""
+        from app.services import demo_cache as dc
+
+        manifest = dc.load_manifest(slug)
+        if not manifest:
+            raise RuntimeError(f"demo cache manifest missing for slug={slug}")
+        texts: list[str] = manifest.get("narration_texts", [])
+        if len(texts) != len(scenes):
+            raise RuntimeError(
+                f"demo cache narration_texts length {len(texts)} != scenes {len(scenes)}"
+            )
+        root = dc.demo_cache_root() / slug
+        for idx, scene in enumerate(scenes):
+            scene_dir = root / "scenes" / str(idx)
+            nt = texts[idx]
+            scene.narration_text = nt
+            spec = dict(scene.scene_spec_json or {})
+            spec["narration_text"] = nt
+            scene.scene_spec_json = spec
+            scene.status = SceneStatus.generating
+
+            scene_id_key = spec.get("scene_id", str(scene.id))
+
+            wav_path = scene_dir / "narration.wav"
+            wav_bytes = wav_path.read_bytes()
+            dur = dc.wav_duration_sec(wav_path)
+            audio_url = await self.storage.put_file(
+                f"audio/narrations/{scene_id_key}.wav",
+                wav_bytes,
+                "audio/wav",
+            )
+            db.add(
+                SceneAsset(
+                    scene_id=scene.id,
+                    asset_type=AssetType.audio,
+                    provider="tts",
+                    prompt_version="demo-cache",
+                    storage_url=audio_url,
+                    metadata_json={
+                        "duration_sec": round(dur, 2),
+                        "type": "narration",
+                        "demo_cache": slug,
+                    },
+                    status=AssetStatus.ready,
+                )
+            )
+
+            img_path = scene_dir / "image.png"
+            img_bytes = img_path.read_bytes()
+            img_url = await self.storage.put_file(
+                f"assets/{lesson.id}/{scene.id}/image.png",
+                img_bytes,
+                "image/png",
+            )
+            db.add(
+                SceneAsset(
+                    scene_id=scene.id,
+                    asset_type=AssetType.image,
+                    provider="image",
+                    prompt_version="demo-cache",
+                    storage_url=img_url,
+                    metadata_json={"demo_cache": slug},
+                    status=AssetStatus.ready,
+                )
+            )
+
+            vid_path = scene_dir / "video.mp4"
+            if vid_path.is_file() and vid_path.stat().st_size > 500:
+                vid_bytes = vid_path.read_bytes()
+                vid_url = await self.storage.put_file(
+                    f"assets/{lesson.id}/{scene.id}/video.mp4",
+                    vid_bytes,
+                    "video/mp4",
+                )
+                db.add(
+                    SceneAsset(
+                        scene_id=scene.id,
+                        asset_type=AssetType.video,
+                        provider="video",
+                        prompt_version="demo-cache",
+                        storage_url=vid_url,
+                        metadata_json={"demo_cache": slug},
+                        status=AssetStatus.ready,
+                    )
+                )
+
+            scene.status = SceneStatus.rendered
 
     async def regenerate_single_scene_assets(self, scene: Scene) -> None:
         """Re-generate TTS and image/video assets for a single scene."""
@@ -586,7 +727,8 @@ class LessonPipeline:
             .where(SceneAsset.scene_id.in_([s.id for s in scenes]))
             .where(SceneAsset.asset_type == AssetType.audio)
         )
-        audio_urls = [a.storage_url for a in audio_result.scalars().all()]
+        audio_rows = list(audio_result.scalars().all())
+        audio_urls = _ordered_audio_urls_for_scenes(scenes, audio_rows)
 
         # Attach asset URLs to scene specs for composition
         all_assets_result = await db.execute(
@@ -606,30 +748,60 @@ class LessonPipeline:
             spec["_video_asset_url"] = video_assets_by_scene.get(str(scene_obj.id), "")
             spec["_image_asset_url"] = image_assets_by_scene.get(str(scene_obj.id), "")
 
-        total_duration = sum(s.duration_sec for s in scenes)
-        predominant_mood = "neutral"
-        if scene_specs:
-            moods = [s.get("music_mood", "neutral") for s in scene_specs]
-            predominant_mood = max(set(moods), key=moods.count)
+        from app.services import demo_cache as dc
 
-        music_url: str | None = None
-        if total_duration > 0:
-            music_url = await self.music.generate_background_track(
-                mood=predominant_mood,
-                duration_sec=total_duration,
-                lesson_id=str(lesson.id),
+        slug = dc.resolve_demo_cache_slug(lesson.input_topic)
+        cached_mp4 = dc.cached_final_video_path(slug) if slug else None
+
+        if cached_mp4 is not None:
+            video_bytes = cached_mp4.read_bytes()
+            video_url = await self.storage.put_file(
+                f"output/{lesson.id}/lesson.mp4",
+                video_bytes,
+                "video/mp4",
             )
-
-        if mode == "preview":
-            video_url = await self.rendering.render_preview(
-                scene_specs, lesson.style_preset.value,
-                lesson_id=str(lesson.id), audio_urls=audio_urls,
+            srt_path = dc.cached_subtitles_path(slug) if slug else None
+            if srt_path and srt_path.is_file():
+                await self.storage.put_file(
+                    f"output/{lesson.id}/subtitles.srt",
+                    srt_path.read_bytes(),
+                    "text/srt",
+                )
+            logger.info(
+                "Pipeline.run_render: demo cache final video slug=%s lesson=%s",
+                slug,
+                lesson.id,
             )
         else:
-            video_url = await self.rendering.render_final(
-                scene_specs, lesson.style_preset.value, audio_urls, music_url,
-                lesson_id=str(lesson.id),
-            )
+            total_duration = sum(s.duration_sec for s in scenes)
+            predominant_mood = "neutral"
+            if scene_specs:
+                moods = [s.get("music_mood", "neutral") for s in scene_specs]
+                predominant_mood = max(set(moods), key=moods.count)
+
+            music_url: str | None = None
+            if total_duration > 0:
+                music_url = await self.music.generate_background_track(
+                    mood=predominant_mood,
+                    duration_sec=total_duration,
+                    lesson_id=str(lesson.id),
+                )
+
+            if mode == "preview":
+                video_url = await self.rendering.render_preview(
+                    scene_specs,
+                    lesson.style_preset.value,
+                    lesson_id=str(lesson.id),
+                    audio_urls=audio_urls,
+                )
+            else:
+                video_url = await self.rendering.render_final(
+                    scene_specs,
+                    lesson.style_preset.value,
+                    audio_urls,
+                    music_url,
+                    lesson_id=str(lesson.id),
+                )
 
         job.status = RenderJobStatus.completed
         job.progress = 100.0

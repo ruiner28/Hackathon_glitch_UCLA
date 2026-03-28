@@ -16,7 +16,8 @@ import {
   Clapperboard,
   Loader2,
 } from "lucide-react";
-import type { Scene } from "@/types";
+import { sceneRenderMode, sceneWillUseVeo } from "@/lib/scene-spec";
+import type { Scene, SceneRenderMode } from "@/types";
 
 const sceneTypeColors: Record<string, string> = {
   deterministic_animation: "bg-blue-100 text-blue-800 border-blue-200",
@@ -45,7 +46,7 @@ interface SceneEditorProps {
   }) => void;
   onRegenerate: () => void;
   onRegenerateAssets?: () => void;
-  onToggleVeo?: (enabled: boolean) => void;
+  onRenderModeChange?: (mode: SceneRenderMode) => void;
   isSaving?: boolean;
   isRegenerating?: boolean;
   isRegeneratingAssets?: boolean;
@@ -56,7 +57,7 @@ export function SceneEditor({
   onSave,
   onRegenerate,
   onRegenerateAssets,
-  onToggleVeo,
+  onRenderModeChange,
   isSaving = false,
   isRegenerating = false,
   isRegeneratingAssets = false,
@@ -72,7 +73,15 @@ export function SceneEditor({
     sceneTypeColors[scene.scene_type] ||
     "bg-gray-100 text-gray-800 border-gray-200";
 
-  const isVeoEligible = !!(scene.scene_spec_json?.veo_eligible);
+  const renderMode = sceneRenderMode(scene);
+  const willVeo = sceneWillUseVeo(scene);
+  const stylePreset = String(scene.scene_spec_json?.style_preset || "").trim();
+  const continuityAnchor = String(
+    scene.scene_spec_json?.continuity_anchor || ""
+  ).trim();
+  const transitionNote = String(
+    scene.scene_spec_json?.transition_note || ""
+  ).trim();
 
   const hasChanges =
     narration !== narrationText ||
@@ -105,6 +114,21 @@ export function SceneEditor({
           <Badge variant="outline" className="text-xs">
             {scene.render_strategy}
           </Badge>
+          {stylePreset && (
+            <Badge variant="secondary" className="text-xs">
+              Style: {stylePreset}
+            </Badge>
+          )}
+          <Badge
+            variant="outline"
+            className={
+              willVeo
+                ? "text-xs border-violet-300 text-violet-700"
+                : "text-xs"
+            }
+          >
+            {willVeo ? "Veo-capable" : "Static frame"}
+          </Badge>
         </div>
       </div>
 
@@ -127,30 +151,49 @@ export function SceneEditor({
         />
       </div>
 
-      {/* Veo Toggle */}
-      {onToggleVeo && (
-        <div className="flex items-center justify-between rounded-lg border p-3 bg-card">
+      {/* Motion: Auto / Static / Veo — maps to scene_spec_json.render_mode */}
+      {onRenderModeChange && (
+        <div className="rounded-lg border p-3 bg-card space-y-2">
           <div className="flex items-center gap-2">
             <Clapperboard className="h-4 w-4 text-violet-500" />
             <div>
-              <p className="text-sm font-medium">Veo Motion Clip</p>
-              <p className="text-xs text-muted-foreground">5s cinematic clip for this scene</p>
+              <p className="text-sm font-medium">Motion (GenMedia)</p>
+              <p className="text-xs text-muted-foreground">
+                Auto uses eligibility; Static skips Veo; Veo forces a 3–5s clip when the provider allows.
+              </p>
             </div>
           </div>
-          <button
-            onClick={() => onToggleVeo(!isVeoEligible)}
-            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
-              isVeoEligible ? "bg-violet-600" : "bg-muted"
-            }`}
-            role="switch"
-            aria-checked={isVeoEligible}
+          <select
+            className="w-full text-sm border rounded-md px-2 py-1.5 bg-background"
+            value={renderMode}
+            onChange={(e) =>
+              onRenderModeChange(e.target.value as SceneRenderMode)
+            }
           >
-            <span
-              className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transform transition-transform ${
-                isVeoEligible ? "translate-x-5" : "translate-x-0"
-              }`}
-            />
-          </button>
+            <option value="auto">Auto (score + policy)</option>
+            <option value="force_static">Force static image</option>
+            <option value="force_veo">Force Veo clip</option>
+          </select>
+        </div>
+      )}
+
+      {(continuityAnchor || transitionNote) && (
+        <div className="rounded-lg border border-dashed p-3 bg-muted/20 space-y-1.5">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            Continuity
+          </p>
+          {continuityAnchor && (
+            <p className="text-xs">
+              <span className="text-muted-foreground">Anchor: </span>
+              {continuityAnchor}
+            </p>
+          )}
+          {transitionNote && (
+            <p className="text-xs">
+              <span className="text-muted-foreground">Bridge: </span>
+              {transitionNote}
+            </p>
+          )}
         </div>
       )}
 

@@ -8,6 +8,7 @@ from google.genai import types
 
 from app.core.config import get_settings
 from app.providers.base import ImageProvider
+from app.services.visual_system.nano_banana_prompt import enrich_image_prompt_from_scene_spec
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +29,8 @@ class NanoBananaImageProvider(ImageProvider):
         enhanced_prompt = (
             f"{prompt}. "
             f"Style: {style.replace('_', ' ')}. "
-            f"Clean educational diagram, white background, high contrast, "
-            f"professional technical illustration, no text overlays."
+            f"Premium educational diagram: deep slate or soft white field, high contrast, "
+            f"generous whitespace, crisp vector-like edges, no blurry text, no watermarks."
         )
 
         logger.info("NanoBanana: generating image, prompt=%s", prompt[:100])

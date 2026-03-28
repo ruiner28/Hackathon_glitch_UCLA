@@ -34,6 +34,8 @@ class SceneResponse(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime | None = None
+    preview_image_url: str | None = None
+    """HTTP path to latest scene image thumbnail (see GET /scenes/{id}/thumbnail)."""
 
     model_config = {"from_attributes": True}
 

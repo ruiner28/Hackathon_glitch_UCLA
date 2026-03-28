@@ -156,10 +156,16 @@ Create 6-8 sections with varied scene types. Return ONLY the JSON object."""
     "learning_objective": "string",
     "source_refs": [],
     "scene_type": "deterministic_animation | generated_still_with_motion | veo_cinematic | code_trace | system_design_graph | summary_scene",
+    "style_preset": "clean_academic | modern_technical | cinematic_minimal (match lesson tone; repeat for visual identity)",
     "render_strategy": "remotion | image_to_video | veo | default",
+    "render_mode": "auto | force_static | force_veo — auto uses motion only when it helps; force_static for recap/quiz-heavy stills; force_veo for strong dynamic hooks",
     "duration_sec": number,
-    "narration_text": "Full narration script for this scene (2-4 sentences, pedagogically clear)",
+    "narration_text": "Full narration script for this scene (2-4 sentences). Bridge from the previous idea: use phrases that connect sections into one lesson artifact.",
     "on_screen_text": ["bullet points shown on screen"],
+    "continuity_anchor": "short phrase (e.g. color/motif) tying this scene to the lesson's recurring visual identity",
+    "transition_note": "one line the editor shows before this scene — how it follows the prior section",
+    "fallback_plan": "if video gen fails: what static image should still convey (one sentence)",
+    "transition_metadata": {{"from_section": "string", "to_section": "string", "bridge_phrase": "string"}},
     "visual_elements": [
       {{"type": "string", "description": "string", "position": "string", "style": "string"}}
     ],
@@ -167,19 +173,22 @@ Create 6-8 sections with varied scene types. Return ONLY the JSON object."""
       {{"timestamp_sec": number, "action": "fade_in | reveal | highlight | fade_out", "description": "string"}}
     ],
     "asset_requests": [
-      {{"type": "image | video", "prompt": "string", "provider": "string"}}
+      {{"type": "image | video", "prompt": "string", "provider": "string", "max_duration_sec": 5}}
     ],
     "veo_eligible": true/false,
-    "veo_prompt": "string or null (only if veo_eligible is true — describe the motion scene for Veo)",
-    "image_prompt": "string — detailed prompt for Nano Banana image generation describing the exact visual composition",
+    "veo_score": 0.0-1.0,
+    "veo_prompt": "string or null — only when motion helps (flow, tokens draining, traffic). 3-5 second clip; camera, pacing, what moves.",
+    "image_prompt": "string — Nano Banana still: explicit layout, whitespace, labeled regions, arrows, hierarchy, readable typography; no clutter.",
     "music_mood": "focused | dramatic | curious | uplifting | neutral",
     "teaching_note": "string",
     "validation_notes": ""
   }}
 ]
 
-For image_prompt, be very specific about the visual composition: layout, components, arrows, labels, colors, style.
-For veo_prompt (if eligible), describe motion: what moves, direction, speed, visual style.
+Rules:
+- image_prompt: diagram-style clarity — grid, margins, callouts, consistent palette; educational first.
+- veo_prompt: only for dynamic scenes (flows, counters, queues); keep duration implied short (3-5s); static recap/summary → veo_eligible false, render_mode force_static.
+- Narration should reference on_screen_text and feel continuous across scenes.
 Return ONLY the JSON array."""
         raw = await self._generate(prompt)
         return _extract_json(raw)
