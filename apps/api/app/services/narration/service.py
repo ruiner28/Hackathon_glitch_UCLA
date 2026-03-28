@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from app.providers.base import LLMProvider, StorageProvider, TTSProvider
@@ -5,6 +6,7 @@ from app.providers.base import LLMProvider, StorageProvider, TTSProvider
 logger = logging.getLogger(__name__)
 
 CHARS_PER_SECOND = 15  # ~150 WPM at ~5 chars/word
+_MAX_CONCURRENT_TTS = 5
 
 
 class NarrationService:
@@ -62,16 +64,19 @@ class NarrationService:
     async def generate_all_narrations(
         self, scenes: list[dict], lesson_id: str
     ) -> list[dict]:
-        """Generate narrations for all scenes in order."""
+        """Generate narrations for all scenes in parallel (bounded concurrency)."""
         logger.info(
-            "NarrationService: generating narrations for %d scenes, lesson=%s",
+            "NarrationService: generating %d narrations in parallel, lesson=%s",
             len(scenes), lesson_id,
         )
-        results: list[dict] = []
-        for scene_spec in scenes:
-            result = await self.generate_narration(scene_spec)
-            results.append(result)
-        return results
+        sem = asyncio.Semaphore(_MAX_CONCURRENT_TTS)
+
+        async def _bounded(scene_spec: dict) -> dict:
+            async with sem:
+                return await self.generate_narration(scene_spec)
+
+        results = await asyncio.gather(*[_bounded(s) for s in scenes])
+        return list(results)
 
     async def generate_transcript(self, scenes: list[dict]) -> dict:
         """

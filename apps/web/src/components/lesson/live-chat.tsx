@@ -3,12 +3,32 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { getLiveWebSocketUrl } from "@/lib/api";
-import { Mic, MicOff, X, MessageCircle, Volume2 } from "lucide-react";
+import {
+  Mic,
+  MicOff,
+  X,
+  MessageCircle,
+  Volume2,
+  ChevronLeft,
+  ChevronRight,
+  BookOpen,
+} from "lucide-react";
+import type { WalkthroughState } from "@/lib/api";
+
+export interface ComponentQuestion {
+  componentId: string;
+  label: string;
+  timestamp: number;
+}
 
 interface LiveChatProps {
   lessonId: string;
   currentStateId?: string;
   className?: string;
+  walkthroughStates?: WalkthroughState[];
+  currentWalkthroughIndex?: number;
+  onAdvanceState?: (index: number) => void;
+  componentQuestion?: ComponentQuestion | null;
 }
 
 type ConnectionState = "idle" | "connecting" | "connected" | "error";
@@ -58,11 +78,18 @@ export function LiveChat({
   lessonId,
   currentStateId,
   className,
+  walkthroughStates,
+  currentWalkthroughIndex,
+  onAdvanceState,
+  componentQuestion,
 }: LiveChatProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("idle");
   const [speakingState, setSpeakingState] = useState<SpeakingState>("idle");
+  const [guidedMode, setGuidedMode] = useState(false);
+  const guidedPendingRef = useRef(false);
+  const sendNarrateStateRef = useRef<(idx: number) => void>(() => {});
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -284,12 +311,20 @@ export function LiveChat({
                 ? Math.max(0, nextPlayTimeRef.current - ctx.currentTime)
                 : 0;
               const delay = Math.max(300, remaining * 1000 + 300);
-              setTimeout(() => {
-                if (wsRef.current?.readyState === WebSocket.OPEN) {
-                  micGateRef.current = true;
-                  setSpeakingState("listening");
-                }
-              }, delay);
+
+              if (guidedPendingRef.current) {
+                guidedPendingRef.current = false;
+                setTimeout(() => {
+                  sendNarrateStateRef.current(0);
+                }, delay);
+              } else {
+                setTimeout(() => {
+                  if (wsRef.current?.readyState === WebSocket.OPEN) {
+                    micGateRef.current = true;
+                    setSpeakingState("listening");
+                  }
+                }, delay);
+              }
               break;
             }
 
@@ -335,6 +370,52 @@ export function LiveChat({
     };
   }, [disconnect]);
 
+  const lastComponentQuestionTs = useRef(0);
+
+  useEffect(() => {
+    if (!componentQuestion || componentQuestion.timestamp <= lastComponentQuestionTs.current)
+      return;
+    lastComponentQuestionTs.current = componentQuestion.timestamp;
+
+    setIsOpen(true);
+
+    const question = `Tell me about the "${componentQuestion.label}" component — what role does it play and how does it work?`;
+
+    if (connectionState === "connected") {
+      sendTextMessage(question);
+    } else if (connectionState === "idle" || connectionState === "error") {
+      const origConnect = connect;
+      (async () => {
+        await origConnect();
+        const waitForReady = () =>
+          new Promise<void>((resolve) => {
+            const check = setInterval(() => {
+              if (wsRef.current?.readyState === WebSocket.OPEN) {
+                clearInterval(check);
+                resolve();
+              }
+            }, 100);
+            setTimeout(() => {
+              clearInterval(check);
+              resolve();
+            }, 5000);
+          });
+        await waitForReady();
+        setTimeout(() => {
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: "text", text: question }));
+            setTranscript((prev) => [
+              ...prev,
+              { role: "user", text: question, timestamp: Date.now() },
+            ]);
+            setSpeakingState("thinking");
+          }
+        }, 500);
+      })();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [componentQuestion]);
+
   const handleToggle = () => {
     if (isOpen && connectionState === "connected") {
       disconnect();
@@ -360,6 +441,84 @@ export function LiveChat({
       ]);
       setSpeakingState("thinking");
     }
+  };
+
+  const sendNarrateState = useCallback(
+    (stateIdx: number) => {
+      if (!walkthroughStates || !wsRef.current) return;
+      const state = walkthroughStates[stateIdx];
+      if (!state) return;
+
+      const payload = {
+        type: "narrate_state",
+        state: {
+          title: state.title,
+          narration: state.narration,
+          step_number: stateIdx + 1,
+          total_steps: walkthroughStates.length,
+          focus_regions: state.focus_regions || [],
+          highlight_paths: state.highlight_paths || [],
+        },
+      };
+
+      micGateRef.current = false;
+      wsRef.current.send(JSON.stringify(payload));
+      setTranscript((prev) => [
+        ...prev,
+        {
+          role: "user",
+          text: `[Step ${stateIdx + 1}/${walkthroughStates.length}: ${state.title}]`,
+          timestamp: Date.now(),
+        },
+      ]);
+      setSpeakingState("thinking");
+    },
+    [walkthroughStates],
+  );
+
+  useEffect(() => {
+    sendNarrateStateRef.current = sendNarrateState;
+  }, [sendNarrateState]);
+
+  const startGuidedTour = useCallback(async () => {
+    if (!walkthroughStates?.length) return;
+    setGuidedMode(true);
+    guidedPendingRef.current = true;
+    onAdvanceState?.(0);
+
+    if (connectionState !== "connected") {
+      await connect();
+    } else {
+      sendNarrateStateRef.current(0);
+      guidedPendingRef.current = false;
+    }
+  }, [walkthroughStates, connectionState, connect, onAdvanceState]);
+
+  const handleGuidedNext = () => {
+    if (
+      !walkthroughStates ||
+      currentWalkthroughIndex === undefined ||
+      speakingState === "speaking"
+    )
+      return;
+    const next = Math.min(
+      walkthroughStates.length - 1,
+      currentWalkthroughIndex + 1,
+    );
+    onAdvanceState?.(next);
+    sendNarrateState(next);
+  };
+
+  const handleGuidedPrev = () => {
+    if (
+      !walkthroughStates ||
+      currentWalkthroughIndex === undefined ||
+      speakingState === "speaking"
+    )
+      return;
+    const prev = Math.max(0, currentWalkthroughIndex - 1);
+    onAdvanceState?.(prev);
+    sendNarrateState(prev);
   };
 
   const stateColors: Record<SpeakingState, string> = {
@@ -412,7 +571,7 @@ export function LiveChat({
                 )}
               />
               <span className="text-sm font-semibold text-slate-800">
-                Ask about the diagram
+                {guidedMode ? "Guided Walkthrough" : "Ask about the diagram"}
               </span>
             </div>
             <button
@@ -466,6 +625,15 @@ export function LiveChat({
                   Ask questions about the diagram in real-time. Gemini can see
                   what you&apos;re viewing and explain it.
                 </p>
+                {walkthroughStates && walkthroughStates.length > 0 && (
+                  <button
+                    onClick={startGuidedTour}
+                    className="mt-4 flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md hover:shadow-lg transition-all hover:scale-[1.02]"
+                  >
+                    <BookOpen className="h-4 w-4" />
+                    Start Guided Tour
+                  </button>
+                )}
               </div>
             )}
 
@@ -498,14 +666,65 @@ export function LiveChat({
             </div>
           )}
 
+          {connectionState === "connected" && guidedMode && walkthroughStates && currentWalkthroughIndex !== undefined && (
+            <div className="border-t px-3 py-2 bg-indigo-50/80">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-medium text-indigo-700">
+                  Step {currentWalkthroughIndex + 1} of {walkthroughStates.length}
+                </span>
+                <span className="text-xs text-indigo-500 truncate max-w-[180px]">
+                  {walkthroughStates[currentWalkthroughIndex]?.title}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleGuidedPrev}
+                  disabled={currentWalkthroughIndex <= 0 || speakingState === "speaking"}
+                  className="flex items-center gap-1 rounded-lg border border-indigo-200 bg-white px-2.5 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  Prev
+                </button>
+                <div className="flex-1 flex gap-0.5">
+                  {walkthroughStates.map((_, i) => (
+                    <div
+                      key={i}
+                      className={cn(
+                        "h-1 flex-1 rounded-full transition-colors",
+                        i <= currentWalkthroughIndex
+                          ? "bg-indigo-500"
+                          : "bg-indigo-200",
+                      )}
+                    />
+                  ))}
+                </div>
+                <button
+                  onClick={handleGuidedNext}
+                  disabled={currentWalkthroughIndex >= walkthroughStates.length - 1 || speakingState === "speaking"}
+                  className="flex items-center gap-1 rounded-lg border border-indigo-200 bg-white px-2.5 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {connectionState === "connected" && (
             <div className="border-t px-3 py-2 flex flex-wrap gap-1.5">
-              {[
-                "Explain this simpler",
-                "What happens next?",
-                "Why is this important?",
-                "Give me an example",
-              ].map((q) => (
+              {(guidedMode
+                ? [
+                    "Explain this simpler",
+                    "Give me an example",
+                    "Why does this matter?",
+                  ]
+                : [
+                    "Explain this simpler",
+                    "What happens next?",
+                    "Why is this important?",
+                    "Give me an example",
+                  ]
+              ).map((q) => (
                 <button
                   key={q}
                   onClick={() => sendTextMessage(q)}
@@ -518,35 +737,61 @@ export function LiveChat({
           )}
 
           <div className="border-t px-4 py-3 bg-slate-50">
-            <button
-              onClick={handleConnect}
-              disabled={connectionState === "connecting"}
-              className={cn(
-                "w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all",
-                connectionState === "connected"
-                  ? "bg-red-100 text-red-700 hover:bg-red-200"
-                  : connectionState === "connecting"
-                    ? "bg-slate-200 text-slate-400 cursor-wait"
-                    : "bg-primary text-primary-foreground hover:bg-primary/90",
-              )}
-            >
-              {connectionState === "connecting" ? (
-                <>
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                  Connecting...
-                </>
-              ) : connectionState === "connected" ? (
-                <>
-                  <MicOff className="h-4 w-4" />
-                  End Conversation
-                </>
-              ) : (
-                <>
+            {connectionState === "idle" && !guidedMode && walkthroughStates && walkthroughStates.length > 0 ? (
+              <div className="flex gap-2">
+                <button
+                  onClick={handleConnect}
+                  className="flex-1 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+                >
                   <Mic className="h-4 w-4" />
-                  Start Talking
-                </>
-              )}
-            </button>
+                  Free Talk
+                </button>
+                <button
+                  onClick={startGuidedTour}
+                  className="flex-1 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold bg-gradient-to-r from-indigo-500 to-purple-600 text-white hover:shadow-md transition-all"
+                >
+                  <BookOpen className="h-4 w-4" />
+                  Guided Tour
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => {
+                  if (connectionState === "connected") {
+                    setGuidedMode(false);
+                    disconnect();
+                  } else {
+                    connect();
+                  }
+                }}
+                disabled={connectionState === "connecting"}
+                className={cn(
+                  "w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all",
+                  connectionState === "connected"
+                    ? "bg-red-100 text-red-700 hover:bg-red-200"
+                    : connectionState === "connecting"
+                      ? "bg-slate-200 text-slate-400 cursor-wait"
+                      : "bg-primary text-primary-foreground hover:bg-primary/90",
+                )}
+              >
+                {connectionState === "connecting" ? (
+                  <>
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    Connecting...
+                  </>
+                ) : connectionState === "connected" ? (
+                  <>
+                    <MicOff className="h-4 w-4" />
+                    End {guidedMode ? "Tour" : "Conversation"}
+                  </>
+                ) : (
+                  <>
+                    <Mic className="h-4 w-4" />
+                    Start Talking
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
       )}

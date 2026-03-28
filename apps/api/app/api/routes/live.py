@@ -55,16 +55,34 @@ def _build_system_instruction(
     diagram_spec: dict | None,
     walkthrough_states: list[dict] | None,
     conversation_history: list[dict] | None = None,
+    narration_state: dict | None = None,
 ) -> str:
-    parts: list[str] = [
-        f"You are an expert, friendly computer science tutor helping a student understand '{topic}'.",
-        "IMPORTANT: Always respond in English only, regardless of what language the user speaks or what language you detect. All your responses must be entirely in English.",
-        "The student is viewing an interactive system-design diagram while you talk.",
-        "Answer questions conversationally — be concise but thorough.",
-        "Reference specific components, connections, and concepts from the diagram.",
-        "If the student seems confused, simplify your explanation and use analogies.",
-        "Keep responses under 30 seconds of speech unless the student asks for more detail.",
-    ]
+    if narration_state:
+        parts: list[str] = [
+            f"You are a live narrator guiding a student through an interactive diagram about '{topic}'.",
+            "IMPORTANT: Always respond in English only.",
+            f"You are currently explaining step {narration_state.get('step_number', '?')} of {narration_state.get('total_steps', '?')}.",
+            f"The concept to explain: {narration_state.get('title', 'Unknown')}.",
+            f"Key points to cover: {narration_state.get('narration', '')}",
+            "",
+            "NARRATION GUIDELINES:",
+            "- Explain this concept as if teaching it live to a student who can see the diagram.",
+            "- Be conversational, engaging, and concise — aim for 20-30 seconds of speech.",
+            "- Reference the specific components highlighted in the diagram.",
+            "- Use analogies when helpful.",
+            "- After explaining, naturally invite the student to ask questions or continue.",
+            "- If the student asks a question, answer it thoroughly before they move on.",
+        ]
+    else:
+        parts: list[str] = [
+            f"You are an expert, friendly computer science tutor helping a student understand '{topic}'.",
+            "IMPORTANT: Always respond in English only, regardless of what language the user speaks or what language you detect. All your responses must be entirely in English.",
+            "The student is viewing an interactive system-design diagram while you talk.",
+            "Answer questions conversationally — be concise but thorough.",
+            "Reference specific components, connections, and concepts from the diagram.",
+            "If the student seems confused, simplify your explanation and use analogies.",
+            "Keep responses under 30 seconds of speech unless the student asks for more detail.",
+        ]
 
     if diagram_spec:
         components = diagram_spec.get("components", [])
@@ -200,6 +218,18 @@ async def _run_single_turn(
                             ),
                             turn_complete=True,
                         )
+                    elif mt == "narrate_state":
+                        state_data = data.get("state", {})
+                        txt = f"Please explain this concept: {state_data.get('title', '')}. Cover these points: {state_data.get('narration', '')}"
+                        print(f"[LIVE] T{turn_number} narrate_state: {state_data.get('title', '?')!r}", flush=True)
+                        user_parts.append(txt)
+                        await session.send_client_content(
+                            turns=types.Content(
+                                role="user",
+                                parts=[types.Part(text=txt)],
+                            ),
+                            turn_complete=True,
+                        )
                     elif mt == "end":
                         stop.set()
                         return "end"
@@ -308,12 +338,14 @@ async def live_chat(websocket: WebSocket, lesson_id: str):
 
     conversation_history: list[dict] = []
     turn = 0
+    current_narration_state: dict | None = None
 
     try:
         while True:
             sys_text = _build_system_instruction(
                 topic, diagram_spec, walkthrough_states,
                 conversation_history=conversation_history or None,
+                narration_state=current_narration_state,
             )
 
             config = types.LiveConnectConfig(
@@ -350,6 +382,17 @@ async def live_chat(websocket: WebSocket, lesson_id: str):
                     turn += 1
                     await websocket.send_json({"type": "turn_complete"})
                     print(f"[LIVE] Turn {turn - 1} done, reconnecting...", flush=True)
+
+                    current_narration_state = None
+                    try:
+                        msg = await asyncio.wait_for(websocket.receive(), timeout=0.1)
+                        if "text" in msg:
+                            data = json.loads(msg["text"])
+                            if data.get("type") == "set_narration_state":
+                                current_narration_state = data.get("state")
+                                print(f"[LIVE] Narration state set: {current_narration_state.get('title', '?') if current_narration_state else 'None'}", flush=True)
+                    except (asyncio.TimeoutError, Exception):
+                        pass
 
             except Exception as exc:
                 print(f"[LIVE] Session error: {exc}", flush=True)

@@ -7,17 +7,12 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useDropzone } from "react-dropzone";
 import { Header } from "@/components/layout/header";
-import { Footer } from "@/components/layout/footer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
 } from "@/components/ui/card";
 import {
   Select,
@@ -48,7 +43,6 @@ const topicSchema = z.object({
 
 type TopicFormData = z.infer<typeof topicSchema>;
 
-/** Match homepage featured demos so URL ?topic=… picks the right domain. */
 const SHOWCASE_TOPIC_DOMAIN: Record<string, string> = {
   "Rate Limiter": "system_design",
   "OS Deadlock": "cs_concepts",
@@ -63,9 +57,7 @@ function NewLessonContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState("");
-  const [activeTab, setActiveTab] = useState(
-    prefilledTopic ? "topic" : "topic"
-  );
+  const [activeTab, setActiveTab] = useState("topic");
 
   const {
     register,
@@ -82,14 +74,12 @@ function NewLessonContent() {
         "cs_concepts",
       style_preset: "clean_academic",
       duration_seconds: 120,
-      music_enabled: true,
+      music_enabled: false,
     },
   });
 
   const currentTopic = watch("topic");
   const currentDomain = watch("domain");
-  const currentDuration = watch("duration_seconds");
-  const musicEnabled = watch("music_enabled");
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setUploadError("");
@@ -163,258 +153,167 @@ function NewLessonContent() {
   return (
     <>
       <Header />
-      <main className="flex-1 gradient-bg">
-        <div className="container py-12">
-          <div className="mx-auto max-w-2xl">
-            <div className="mb-8 text-center">
-              <h1 className="text-3xl font-bold tracking-tight">
-                Create a New Lesson
-              </h1>
-              <p className="mt-2 text-muted-foreground">
-                Enter a topic or upload materials to generate a visual lesson
-              </p>
-            </div>
+      <main className="flex-1 bg-slate-50 min-h-screen">
+        <div className="max-w-lg mx-auto px-6 py-12">
+          <div className="mb-8 text-center">
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+              New Deep Dive
+            </h1>
+            <p className="mt-1.5 text-sm text-slate-400">
+              Enter a CS topic or upload a paper to generate an interactive lesson
+            </p>
+          </div>
 
-            <Card className="shadow-lg">
-              <CardContent className="pt-6">
-                <Tabs
-                  value={activeTab}
-                  onValueChange={setActiveTab}
-                >
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="topic" className="gap-1.5">
-                      <PenLine className="h-4 w-4" />
-                      Enter Topic
-                    </TabsTrigger>
-                    <TabsTrigger value="upload" className="gap-1.5">
-                      <Upload className="h-4 w-4" />
-                      Upload File
-                    </TabsTrigger>
-                  </TabsList>
+          <Card className="shadow-sm border-slate-200">
+            <CardContent className="pt-6">
+              <Tabs value={activeTab} onValueChange={setActiveTab}>
+                <TabsList className="grid w-full grid-cols-2 mb-6">
+                  <TabsTrigger value="topic" className="gap-1.5">
+                    <PenLine className="h-3.5 w-3.5" />
+                    Topic
+                  </TabsTrigger>
+                  <TabsTrigger value="upload" className="gap-1.5">
+                    <Upload className="h-3.5 w-3.5" />
+                    Upload
+                  </TabsTrigger>
+                </TabsList>
 
-                  {/* Topic Tab */}
-                  <TabsContent value="topic" className="mt-6">
-                    <form
-                      onSubmit={handleSubmit(onSubmitTopic)}
-                      className="space-y-6"
-                    >
-                      <div className="space-y-2">
-                        <Label htmlFor="topic">Topic</Label>
-                        <Input
-                          id="topic"
-                          placeholder="e.g. How TCP three-way handshake works"
-                          {...register("topic")}
-                        />
-                        {errors.topic && (
-                          <p className="text-sm text-destructive">
-                            {errors.topic.message}
-                          </p>
-                        )}
-                      </div>
-
-                      <TopicSuggestions
-                        onSelect={(topic, domain) => {
-                          setValue("topic", topic);
-                          if (domain) setValue("domain", domain);
-                        }}
-                        selectedTopic={currentTopic}
+                <TabsContent value="topic">
+                  <form
+                    onSubmit={handleSubmit(onSubmitTopic)}
+                    className="space-y-5"
+                  >
+                    <div className="space-y-1.5">
+                      <Label htmlFor="topic" className="text-slate-700">
+                        What do you want to learn?
+                      </Label>
+                      <Input
+                        id="topic"
+                        placeholder="e.g. Rate Limiter, TCP Handshake, B-Trees..."
+                        className="h-11"
+                        {...register("topic")}
                       />
-
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label>Domain</Label>
-                          <Select
-                            value={currentDomain}
-                            onValueChange={(v) => setValue("domain", v)}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="cs_concepts">
-                                CS Concepts
-                              </SelectItem>
-                              <SelectItem value="system_design">
-                                System Design
-                              </SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Style Preset</Label>
-                          <Select
-                            defaultValue="clean_academic"
-                            onValueChange={(v) => setValue("style_preset", v)}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="clean_academic">
-                                Clean Academic
-                              </SelectItem>
-                              <SelectItem value="modern_technical">
-                                Modern Technical
-                              </SelectItem>
-                              <SelectItem value="cinematic_minimal">
-                                Cinematic Minimal
-                              </SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <Label>
-                            Duration: {Math.floor(currentDuration / 60)}:
-                            {String(currentDuration % 60).padStart(2, "0")}
-                          </Label>
-                          <span className="text-xs text-muted-foreground">
-                            30s – 10min
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min={30}
-                          max={600}
-                          step={30}
-                          value={currentDuration}
-                          onChange={(e) =>
-                            setValue(
-                              "duration_seconds",
-                              parseInt(e.target.value)
-                            )
-                          }
-                          className="w-full accent-primary"
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between rounded-lg border p-4">
-                        <div>
-                          <Label>Background Music</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Add subtle background music to the lesson
-                          </p>
-                        </div>
-                        <Switch
-                          checked={musicEnabled}
-                          onCheckedChange={(v) => setValue("music_enabled", v)}
-                        />
-                      </div>
-
-                      <Button
-                        type="submit"
-                        className="w-full"
-                        size="lg"
-                        disabled={isSubmitting}
-                      >
-                        {isSubmitting ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Creating Lesson...
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles className="mr-2 h-4 w-4" />
-                            Generate Lesson
-                          </>
-                        )}
-                      </Button>
-                    </form>
-                  </TabsContent>
-
-                  {/* Upload Tab */}
-                  <TabsContent value="upload" className="mt-6 space-y-6">
-                    <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3">
-                      <p className="text-sm text-blue-800 font-medium">Research Paper & Slides Flow</p>
-                      <p className="text-xs text-blue-600 mt-1">
-                        Upload a PDF paper or PPTX slides. We&apos;ll parse sections, simplify key ideas,
-                        and generate a visual walkthrough with narrated explanations.
-                      </p>
+                      {errors.topic && (
+                        <p className="text-sm text-destructive">
+                          {errors.topic.message}
+                        </p>
+                      )}
                     </div>
 
-                    {!uploadedFile ? (
-                      <div
-                        {...getRootProps()}
-                        className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-12 text-center transition-colors cursor-pointer ${
-                          isDragActive
-                            ? "border-primary bg-primary/5"
-                            : "border-border hover:border-primary/50 hover:bg-muted/50"
-                        }`}
-                      >
-                        <input {...getInputProps()} />
-                        <Upload className="mb-4 h-10 w-10 text-muted-foreground" />
-                        <p className="text-sm font-medium">
-                          {isDragActive
-                            ? "Drop your file here"
-                            : "Drag & drop your paper or slides"}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          PDF or PPTX up to 50MB
-                        </p>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="mt-4"
-                        >
-                          Browse Files
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-4 rounded-lg border bg-muted/50 p-4">
-                        <FileText className="h-10 w-10 text-primary" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">
-                            {uploadedFile.name}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {formatBytes(uploadedFile.size)} &middot;{" "}
-                            {uploadedFile.type.includes("pdf") ? "PDF Document" : "PowerPoint"}
-                          </p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setUploadedFile(null)}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    )}
+                    <TopicSuggestions
+                      onSelect={(topic, domain) => {
+                        setValue("topic", topic);
+                        if (domain) setValue("domain", domain);
+                      }}
+                      selectedTopic={currentTopic}
+                    />
 
-                    {uploadError && (
-                      <p className="text-sm text-destructive">{uploadError}</p>
-                    )}
+                    <div className="space-y-1.5">
+                      <Label className="text-slate-700">Domain</Label>
+                      <Select
+                        value={currentDomain}
+                        onValueChange={(v) => setValue("domain", v)}
+                      >
+                        <SelectTrigger className="h-10">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="cs_concepts">
+                            CS Concepts
+                          </SelectItem>
+                          <SelectItem value="system_design">
+                            System Design
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
 
                     <Button
-                      className="w-full"
-                      size="lg"
-                      disabled={!uploadedFile || isSubmitting}
-                      onClick={onSubmitUpload}
+                      type="submit"
+                      className="w-full h-11"
+                      disabled={isSubmitting}
                     >
                       {isSubmitting ? (
                         <>
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Uploading & Parsing...
+                          Creating...
                         </>
                       ) : (
                         <>
                           <Sparkles className="mr-2 h-4 w-4" />
-                          Generate Visual Walkthrough
+                          Generate Interactive Lesson
                         </>
                       )}
                     </Button>
-                  </TabsContent>
-                </Tabs>
-              </CardContent>
-            </Card>
-          </div>
+                  </form>
+                </TabsContent>
+
+                <TabsContent value="upload" className="space-y-5">
+                  {!uploadedFile ? (
+                    <div
+                      {...getRootProps()}
+                      className={`flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-10 text-center transition-colors cursor-pointer ${
+                        isDragActive
+                          ? "border-primary bg-primary/5"
+                          : "border-slate-200 hover:border-primary/40 hover:bg-slate-50"
+                      }`}
+                    >
+                      <input {...getInputProps()} />
+                      <Upload className="mb-3 h-8 w-8 text-slate-300" />
+                      <p className="text-sm font-medium text-slate-600">
+                        {isDragActive
+                          ? "Drop your file here"
+                          : "Drag & drop a PDF or PPTX"}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-400">Up to 50MB</p>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <FileText className="h-8 w-8 text-primary shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate text-slate-700">
+                          {uploadedFile.name}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {formatBytes(uploadedFile.size)}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setUploadedFile(null)}
+                        className="p-1 rounded hover:bg-slate-200 transition-colors"
+                      >
+                        <X className="h-4 w-4 text-slate-400" />
+                      </button>
+                    </div>
+                  )}
+
+                  {uploadError && (
+                    <p className="text-sm text-destructive">{uploadError}</p>
+                  )}
+
+                  <Button
+                    className="w-full h-11"
+                    disabled={!uploadedFile || isSubmitting}
+                    onClick={onSubmitUpload}
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="mr-2 h-4 w-4" />
+                        Generate Lesson
+                      </>
+                    )}
+                  </Button>
+                </TabsContent>
+              </Tabs>
+            </CardContent>
+          </Card>
         </div>
       </main>
-      <Footer />
     </>
   );
 }
@@ -423,7 +322,7 @@ export default function NewLessonPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center">
+        <div className="flex min-h-screen items-center justify-center bg-slate-50">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       }

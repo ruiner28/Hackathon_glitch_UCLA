@@ -65,6 +65,10 @@ def get_music_provider() -> MusicProvider:
         from app.providers.mock_music import MockMusicProvider
 
         return MockMusicProvider()
+    if settings.MUSIC_PROVIDER == "google":
+        from app.providers.google_music import LyriaMusicProvider
+
+        return LyriaMusicProvider()
     from app.providers.mock_music import MockMusicProvider
 
     return MockMusicProvider()
