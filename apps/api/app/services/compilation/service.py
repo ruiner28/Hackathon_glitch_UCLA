@@ -53,10 +53,12 @@ class CompilationService:
     def _normalise_scene_spec(self, raw: dict, index: int) -> dict:
         """Ensure every SceneSpec dict has all required fields."""
         scene_type = raw.get("scene_type", "deterministic_animation")
-        return {
+        spec = {
             "scene_id": raw.get("scene_id", str(uuid.uuid4())),
+            "lesson_title": raw.get("lesson_title", ""),
             "title": raw.get("title", f"Scene {index + 1}"),
             "learning_objective": raw.get("learning_objective", ""),
+            "teaching_note": raw.get("teaching_note", ""),
             "source_refs": raw.get("source_refs", []),
             "scene_type": scene_type,
             "render_strategy": raw.get(
@@ -69,6 +71,8 @@ class CompilationService:
             "visual_elements": raw.get("visual_elements", []),
             "animation_beats": raw.get("animation_beats", []),
             "asset_requests": raw.get("asset_requests", []),
+            "veo_eligible": raw.get("veo_eligible", False),
+            "veo_score": raw.get("veo_score", 0.0),
             "veo_prompt": raw.get("veo_prompt"),
             "image_prompt": raw.get("image_prompt"),
             "music_mood": raw.get(
@@ -77,3 +81,4 @@ class CompilationService:
             ),
             "validation_notes": raw.get("validation_notes", ""),
         }
+        return spec

@@ -28,10 +28,9 @@ def get_image_provider() -> ImageProvider:
         from app.providers.mock_image import MockImageProvider
 
         return MockImageProvider()
-    # Default to mock until a real image provider is implemented
-    from app.providers.mock_image import MockImageProvider
+    from app.providers.google_image import NanoBananaImageProvider
 
-    return MockImageProvider()
+    return NanoBananaImageProvider()
 
 
 def get_video_provider() -> VideoProvider:
@@ -40,10 +39,9 @@ def get_video_provider() -> VideoProvider:
         from app.providers.mock_video import MockVideoProvider
 
         return MockVideoProvider()
-    # Default to mock until a real video provider is implemented
-    from app.providers.mock_video import MockVideoProvider
+    from app.providers.google_video import VeoVideoProvider
 
-    return MockVideoProvider()
+    return VeoVideoProvider()
 
 
 def get_tts_provider() -> TTSProvider:
@@ -52,6 +50,10 @@ def get_tts_provider() -> TTSProvider:
         from app.providers.mock_tts import MockTTSProvider
 
         return MockTTSProvider()
+    if settings.TTS_PROVIDER == "local":
+        from app.providers.local_tts import LocalTTSProvider
+
+        return LocalTTSProvider()
     from app.providers.google_tts import GoogleTTSProvider
 
     return GoogleTTSProvider()
@@ -63,7 +65,6 @@ def get_music_provider() -> MusicProvider:
         from app.providers.mock_music import MockMusicProvider
 
         return MockMusicProvider()
-    # Default to mock until a real music provider is implemented
     from app.providers.mock_music import MockMusicProvider
 
     return MockMusicProvider()

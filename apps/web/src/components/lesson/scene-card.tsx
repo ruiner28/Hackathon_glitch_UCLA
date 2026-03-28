@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { Clock } from "lucide-react";
+import { Clock, Clapperboard } from "lucide-react";
 import type { Scene } from "@/types";
 
 const sceneTypeColors: Record<string, string> = {
@@ -62,6 +62,12 @@ export function SceneCard({ scene, isSelected, onClick }: SceneCardProps) {
         >
           {sceneTypeLabels[scene.scene_type] || scene.scene_type}
         </span>
+        {!!(scene.scene_spec_json?.veo_eligible) && (
+          <span className="inline-flex items-center gap-0.5 rounded-full bg-violet-100 text-violet-700 px-1.5 py-0.5 text-[10px] font-medium">
+            <Clapperboard className="h-2.5 w-2.5" />
+            Veo
+          </span>
+        )}
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
           <Clock className="h-3 w-3" />
           {scene.duration_sec}s

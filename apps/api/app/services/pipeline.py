@@ -112,13 +112,21 @@ class LessonPipeline:
             )
 
             for frag_data in raw_fragments:
+                meta = {}
+                if frag_data.get("bbox"):
+                    meta["bbox"] = frag_data["bbox"]
+                if frag_data.get("academic_section"):
+                    meta["academic_section"] = frag_data["academic_section"]
+                if frag_data.get("font_size"):
+                    meta["font_size"] = frag_data["font_size"]
+
                 db.add(SourceFragment(
                     source_document_id=source_doc.id,
                     ref_key=frag_data["ref_key"],
                     page_or_slide_number=frag_data.get("page_or_slide_number"),
                     kind=FragmentKind(frag_data["kind"]),
                     text=frag_data["text"],
-                    bbox_json=frag_data.get("bbox"),
+                    bbox_json=meta or None,
                 ))
 
             source_doc.status = SourceDocumentStatus.ready
@@ -157,10 +165,13 @@ class LessonPipeline:
             .where(SourceFragment.source_document_id == source_doc.id)
         )
         fragments = result.scalars().all()
-        fragment_dicts = [
-            {"ref_key": f.ref_key, "kind": f.kind.value, "text": f.text}
-            for f in fragments
-        ]
+        fragment_dicts = []
+        for f in fragments:
+            fd = {"ref_key": f.ref_key, "kind": f.kind.value, "text": f.text}
+            if f.bbox_json and isinstance(f.bbox_json, dict):
+                if f.bbox_json.get("academic_section"):
+                    fd["academic_section"] = f.bbox_json["academic_section"]
+            fragment_dicts.append(fd)
 
         concepts = await self.extraction.extract(fragment_dicts, lesson.domain.value)
 
@@ -169,14 +180,19 @@ class LessonPipeline:
         )
         existing_plan = existing_plan_result.scalar_one_or_none()
 
+        concept_graph = concepts.get("concept_graph", {})
+        if concepts.get("is_paper"):
+            concept_graph["is_paper"] = True
+            concept_graph["paper_sections"] = concepts.get("paper_sections", {})
+
         if existing_plan:
-            existing_plan.concept_graph_json = concepts.get("concept_graph", {})
+            existing_plan.concept_graph_json = concept_graph
             existing_plan.prerequisites_json = concepts.get("prerequisites", [])
             existing_plan.misconceptions_json = concepts.get("misconceptions", [])
         else:
             db.add(LessonPlan(
                 lesson_id=lesson.id,
-                concept_graph_json=concepts.get("concept_graph", {}),
+                concept_graph_json=concept_graph,
                 prerequisites_json=concepts.get("prerequisites", []),
                 misconceptions_json=concepts.get("misconceptions", []),
             ))
@@ -208,9 +224,10 @@ class LessonPipeline:
         if existing_plan and existing_plan.concept_graph_json:
             concept_graph = existing_plan.concept_graph_json
 
+        topic_context = lesson.title or lesson.input_topic or lesson.domain.value
         plan_data = await self.planning.create_plan(
             concepts=concept_graph,
-            domain=lesson.domain.value,
+            domain=topic_context,
             style=lesson.style_preset.value,
         )
 
@@ -325,6 +342,8 @@ class LessonPipeline:
             ))
 
             spec = scene.scene_spec_json or {}
+            generated_image_for_scene = False
+
             for asset_req in spec.get("asset_requests", []):
                 req_type = asset_req.get("type", "")
                 prompt = asset_req.get("prompt", "")
@@ -349,25 +368,106 @@ class LessonPipeline:
                         metadata_json={"prompt": prompt},
                         status=AssetStatus.ready,
                     ))
+                    generated_image_for_scene = True
 
                 elif req_type == "video" and prompt:
+                    max_dur = min(
+                        asset_req.get("max_duration_sec", 5.0),
+                        5.0,
+                    )
+                    try:
+                        video_bytes = await self.video_provider.generate_from_text(
+                            prompt=prompt,
+                            duration_sec=max_dur,
+                        )
+                        vid_path = f"assets/{lesson.id}/{scene.id}/video.mp4"
+                        vid_url = await self.storage.put_file(
+                            vid_path, video_bytes, "video/mp4"
+                        )
+                        db.add(SceneAsset(
+                            scene_id=scene.id,
+                            asset_type=AssetType.video,
+                            provider="video",
+                            prompt_version="v1",
+                            storage_url=vid_url,
+                            metadata_json={
+                                "prompt": prompt,
+                                "max_duration_sec": max_dur,
+                                "veo_score": spec.get("veo_score", 0),
+                            },
+                            status=AssetStatus.ready,
+                        ))
+                    except Exception as veo_err:
+                        logger.warning(
+                            "Veo generation failed for scene %s, using static fallback: %s",
+                            scene.id, veo_err,
+                        )
+
+            # Generate Veo clip for veo-eligible scenes that didn't get one via asset_requests
+            veo_prompt = spec.get("veo_prompt", "")
+            has_video_asset = any(
+                ar.get("type") == "video" for ar in spec.get("asset_requests", [])
+            )
+            if spec.get("veo_eligible") and veo_prompt and not has_video_asset:
+                try:
+                    veo_dur = min(spec.get("duration_sec", 5), 5)
                     video_bytes = await self.video_provider.generate_from_text(
-                        prompt=prompt,
-                        duration_sec=scene.duration_sec,
+                        prompt=veo_prompt, duration_sec=veo_dur,
                     )
-                    vid_path = f"assets/{lesson.id}/{scene.id}/video.mp4"
-                    vid_url = await self.storage.put_file(
-                        vid_path, video_bytes, "video/mp4"
+                    if video_bytes and len(video_bytes) > 500:
+                        vid_path = f"assets/{lesson.id}/{scene.id}/video.mp4"
+                        vid_url = await self.storage.put_file(
+                            vid_path, video_bytes, "video/mp4"
+                        )
+                        db.add(SceneAsset(
+                            scene_id=scene.id,
+                            asset_type=AssetType.video,
+                            provider="video",
+                            prompt_version="v1-fallback-veo",
+                            storage_url=vid_url,
+                            metadata_json={"prompt": veo_prompt, "fallback": True},
+                            status=AssetStatus.ready,
+                        ))
+                        logger.info("Pipeline: fallback Veo clip for scene %s", scene.id)
+                except Exception as veo_err:
+                    logger.warning("Fallback Veo failed for scene %s: %s", scene.id, veo_err)
+
+            # Fallback: generate image for every scene that didn't get one
+            if not generated_image_for_scene:
+                fallback_prompt = spec.get("image_prompt", "")
+                if not fallback_prompt:
+                    title = spec.get("title", "")
+                    narr = spec.get("narration_text", "")
+                    scene_type = spec.get("scene_type", "concept")
+                    fallback_prompt = (
+                        f"Educational {scene_type} diagram for: {title}. "
+                        f"Context: {narr[:200]}. "
+                        f"Clean technical illustration, labeled components."
                     )
-                    db.add(SceneAsset(
-                        scene_id=scene.id,
-                        asset_type=AssetType.video,
-                        provider="video",
-                        prompt_version="v1",
-                        storage_url=vid_url,
-                        metadata_json={"prompt": prompt},
-                        status=AssetStatus.ready,
-                    ))
+                try:
+                    image_bytes = await self.image_provider.generate_image(
+                        prompt=fallback_prompt,
+                        style=lesson.style_preset.value,
+                        width=1920,
+                        height=1080,
+                    )
+                    if image_bytes and len(image_bytes) > 100:
+                        img_path = f"assets/{lesson.id}/{scene.id}/image.png"
+                        img_url = await self.storage.put_file(
+                            img_path, image_bytes, "image/png"
+                        )
+                        db.add(SceneAsset(
+                            scene_id=scene.id,
+                            asset_type=AssetType.image,
+                            provider="image",
+                            prompt_version="v1-fallback",
+                            storage_url=img_url,
+                            metadata_json={"prompt": fallback_prompt, "fallback": True},
+                            status=AssetStatus.ready,
+                        ))
+                        logger.info("Pipeline: fallback image for scene %s", scene.id)
+                except Exception as img_err:
+                    logger.warning("Fallback image failed for scene %s: %s", scene.id, img_err)
 
             scene.status = SceneStatus.rendered
 
@@ -375,6 +475,86 @@ class LessonPipeline:
         logger.info(
             "Pipeline.run_asset_generation: completed for lesson %s", lesson.id
         )
+
+    async def regenerate_single_scene_assets(self, scene: Scene) -> None:
+        """Re-generate TTS and image/video assets for a single scene."""
+        db = self._db
+        assert db is not None
+
+        spec = scene.scene_spec_json or {}
+
+        # Re-generate narration
+        narrations = await self.narration.generate_all_narrations(
+            [spec], str(scene.lesson_id)
+        )
+        if narrations:
+            scene.narration_text = narrations[0]["narration_text"]
+            db.add(SceneAsset(
+                scene_id=scene.id,
+                asset_type=AssetType.audio,
+                provider="tts",
+                prompt_version="v2-regen",
+                storage_url=narrations[0]["audio_url"],
+                metadata_json={
+                    "duration_sec": narrations[0]["duration_sec"],
+                    "type": "narration",
+                    "regenerated": True,
+                },
+                status=AssetStatus.ready,
+            ))
+
+        # Re-generate visual assets
+        result = await db.execute(
+            select(Lesson).where(Lesson.id == scene.lesson_id)
+        )
+        lesson = result.scalar_one_or_none()
+        style_val = lesson.style_preset.value if lesson else "clean_academic"
+
+        for asset_req in spec.get("asset_requests", []):
+            req_type = asset_req.get("type", "")
+            prompt = asset_req.get("prompt", "")
+            if req_type == "image" and prompt:
+                image_bytes = await self.image_provider.generate_image(
+                    prompt=prompt, style=style_val, width=1920, height=1080,
+                )
+                img_path = f"assets/{scene.lesson_id}/{scene.id}/image.png"
+                img_url = await self.storage.put_file(
+                    img_path, image_bytes, "image/png"
+                )
+                db.add(SceneAsset(
+                    scene_id=scene.id,
+                    asset_type=AssetType.image,
+                    provider="image",
+                    prompt_version="v2-regen",
+                    storage_url=img_url,
+                    metadata_json={"prompt": prompt, "regenerated": True},
+                    status=AssetStatus.ready,
+                ))
+            elif req_type == "video" and prompt and spec.get("veo_eligible"):
+                max_dur = min(asset_req.get("max_duration_sec", 5.0), 5.0)
+                try:
+                    video_bytes = await self.video_provider.generate_from_text(
+                        prompt=prompt, duration_sec=max_dur,
+                    )
+                    vid_path = f"assets/{scene.lesson_id}/{scene.id}/video.mp4"
+                    vid_url = await self.storage.put_file(
+                        vid_path, video_bytes, "video/mp4"
+                    )
+                    db.add(SceneAsset(
+                        scene_id=scene.id,
+                        asset_type=AssetType.video,
+                        provider="video",
+                        prompt_version="v2-regen",
+                        storage_url=vid_url,
+                        metadata_json={"prompt": prompt, "regenerated": True},
+                        status=AssetStatus.ready,
+                    ))
+                except Exception as err:
+                    logger.warning("Veo regen failed for scene %s: %s", scene.id, err)
+
+        scene.status = SceneStatus.rendered
+        await db.flush()
+        logger.info("Pipeline: regenerated assets for scene %s", scene.id)
 
     async def run_render(
         self, db: AsyncSession, lesson: Lesson, mode: str = "preview"
@@ -408,6 +588,24 @@ class LessonPipeline:
         )
         audio_urls = [a.storage_url for a in audio_result.scalars().all()]
 
+        # Attach asset URLs to scene specs for composition
+        all_assets_result = await db.execute(
+            select(SceneAsset)
+            .where(SceneAsset.scene_id.in_([s.id for s in scenes]))
+            .where(SceneAsset.asset_type.in_([AssetType.video, AssetType.image]))
+        )
+        video_assets_by_scene: dict[str, str] = {}
+        image_assets_by_scene: dict[str, str] = {}
+        for asset in all_assets_result.scalars().all():
+            sid = str(asset.scene_id)
+            if asset.asset_type == AssetType.video:
+                video_assets_by_scene[sid] = asset.storage_url
+            elif asset.asset_type == AssetType.image:
+                image_assets_by_scene[sid] = asset.storage_url
+        for spec, scene_obj in zip(scene_specs, scenes):
+            spec["_video_asset_url"] = video_assets_by_scene.get(str(scene_obj.id), "")
+            spec["_image_asset_url"] = image_assets_by_scene.get(str(scene_obj.id), "")
+
         total_duration = sum(s.duration_sec for s in scenes)
         predominant_mood = "neutral"
         if scene_specs:
@@ -423,10 +621,14 @@ class LessonPipeline:
             )
 
         if mode == "preview":
-            video_url = await self.rendering.render_preview(scene_specs, lesson.style_preset.value)
+            video_url = await self.rendering.render_preview(
+                scene_specs, lesson.style_preset.value,
+                lesson_id=str(lesson.id), audio_urls=audio_urls,
+            )
         else:
             video_url = await self.rendering.render_final(
-                scene_specs, lesson.style_preset.value, audio_urls, music_url
+                scene_specs, lesson.style_preset.value, audio_urls, music_url,
+                lesson_id=str(lesson.id),
             )
 
         job.status = RenderJobStatus.completed
@@ -457,10 +659,15 @@ class LessonPipeline:
         )
         scenes = result.scalars().all()
 
+        plan_json = plan.plan_json if plan else {}
+        concept_graph = plan.concept_graph_json if plan else {}
+        if concept_graph.get("is_paper"):
+            plan_json["is_paper"] = True
+
         lesson_data = {
             "title": lesson.title,
             "domain": lesson.domain.value,
-            "plan": plan.plan_json if plan else {},
+            "plan": plan_json,
             "scenes": [
                 {
                     "title": s.title,

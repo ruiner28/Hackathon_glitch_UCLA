@@ -22,3 +22,12 @@ class SceneUpdate(BaseModel):
     narration_text: str | None = None
     on_screen_text: list[str] | None = None
     duration_sec: float | None = None
+    veo_eligible: bool | None = None
+
+
+class SceneReorder(BaseModel):
+    scene_ids: list[UUID]
+
+
+class LessonStyleUpdate(BaseModel):
+    style_preset: str

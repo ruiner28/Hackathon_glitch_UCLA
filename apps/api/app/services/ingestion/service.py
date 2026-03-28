@@ -1,9 +1,39 @@
 import logging
 import os
+import re
 
 from app.providers.base import StorageProvider
 
 logger = logging.getLogger(__name__)
+
+_ACADEMIC_SECTION_PATTERNS = [
+    (re.compile(r"^abstract$", re.I), "abstract"),
+    (re.compile(r"^introduction$", re.I), "introduction"),
+    (re.compile(r"^related\s+work", re.I), "related_work"),
+    (re.compile(r"^background", re.I), "background"),
+    (re.compile(r"^(method|approach|model|architecture|system|framework)", re.I), "method"),
+    (re.compile(r"^(experiment|evaluation|result|analysis)", re.I), "results"),
+    (re.compile(r"^(discussion|limitation)", re.I), "discussion"),
+    (re.compile(r"^(conclusion|summary|future)", re.I), "conclusion"),
+    (re.compile(r"^(reference|bibliography)", re.I), "references"),
+    (re.compile(r"^(appendix|supplement)", re.I), "appendix"),
+    (re.compile(r"^(acknowledgment|acknowledgement)", re.I), "acknowledgments"),
+]
+
+
+def _classify_section(text: str) -> str | None:
+    """Match a title-like text against common academic paper section patterns."""
+    cleaned = text.strip().rstrip(".").strip()
+    cleaned = re.sub(r"^\d+\.?\s*", "", cleaned).strip()
+    for pattern, label in _ACADEMIC_SECTION_PATTERNS:
+        if pattern.match(cleaned):
+            return label
+    return None
+
+
+def _is_paper_title(text: str, page_num: int, font_size: float) -> bool:
+    """Heuristic: large font on page 1 is likely the paper title."""
+    return page_num == 1 and font_size > 18 and len(text.split()) >= 3
 
 
 class IngestionService:
@@ -61,7 +91,7 @@ class IngestionService:
         return fragments
 
     async def process_pdf(self, file_path: str, doc_id: str) -> list[dict]:
-        """Extract content from PDF file using PyMuPDF (fitz)."""
+        """Extract content from PDF, with academic paper section detection."""
         import fitz
 
         doc = fitz.open(file_path)
@@ -92,20 +122,36 @@ class IngestionService:
                     continue
 
                 kind = "title" if max_font_size > 16 else "paragraph"
+
+                academic_section = None
+                if kind == "title":
+                    academic_section = _classify_section(combined_text)
+                    if _is_paper_title(combined_text, page_number, max_font_size):
+                        academic_section = "paper_title"
+
                 raw_fragments.append({
                     "ref_key": f"{ref_prefix}_block_{block_idx}",
                     "page_or_slide_number": page_number,
                     "kind": kind,
                     "text": combined_text,
                     "bbox": list(block.get("bbox", [])),
+                    "font_size": max_font_size,
+                    "academic_section": academic_section,
                 })
 
         doc.close()
 
+        # Merge consecutive paragraphs and attach section labels
         merged: list[dict] = []
         current: dict | None = None
+        current_section: str | None = None
 
         for frag in raw_fragments:
+            if frag.get("academic_section"):
+                current_section = frag["academic_section"]
+
+            frag["academic_section"] = frag.get("academic_section") or current_section
+
             if (
                 current
                 and current["kind"] == "paragraph"
@@ -121,9 +167,22 @@ class IngestionService:
         if current:
             merged.append(current)
 
+        # Detect if this looks like an academic paper
+        section_labels = {f.get("academic_section") for f in merged if f.get("academic_section")}
+        is_academic = len(section_labels & {"abstract", "introduction", "conclusion", "method", "results"}) >= 2
+
+        if is_academic:
+            for frag in merged:
+                if not frag.get("academic_section"):
+                    frag["academic_section"] = "body"
+            logger.info(
+                "IngestionService: detected academic paper with sections: %s",
+                sorted(section_labels),
+            )
+
         logger.info(
-            "IngestionService: extracted %d fragments from PDF doc_id=%s",
-            len(merged), doc_id,
+            "IngestionService: extracted %d fragments from PDF doc_id=%s (academic=%s)",
+            len(merged), doc_id, is_academic,
         )
         return merged
 
@@ -134,7 +193,14 @@ class IngestionService:
             "ref_key": "synthetic_topic",
             "page_or_slide_number": None,
             "kind": "synthetic",
-            "text": f"Topic: {topic}. Domain: {domain}.",
+            "text": (
+                f"Create a comprehensive educational lesson about: {topic}. "
+                f"Domain: {domain}. "
+                f"Cover all key concepts, definitions, algorithms, data structures, "
+                f"mechanisms, and practical applications related to {topic}. "
+                f"Include prerequisite knowledge, common misconceptions, "
+                f"and worked examples where applicable."
+            ),
         }]
 
     async def extract_fragments(
