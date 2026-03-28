@@ -1,0 +1,16 @@
+node_modules/
+.next/
+dist/
+__pycache__/
+*.pyc
+.env
+.env.local
+*.egg-info/
+venv/
+.venv/
+uploads/
+generated/
+*.mp4
+*.wav
+*.mp3
+.DS_Store

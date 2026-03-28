@@ -1,0 +1,55 @@
+{
+  "render_id": "a9d3bc86-6ec2-4351-ad24-3563259582af",
+  "quality": "final",
+  "style": "modern_technical",
+  "scene_count": 7,
+  "total_duration_sec": 179,
+  "audio_tracks": [
+    "file:///Users/gauravpawar/Downloads/Hackathon/apps/api/storage/audio/narrations/2c7b23c9-7637-411d-a32f-02f55315c789.wav",
+    "file:///Users/gauravpawar/Downloads/Hackathon/apps/api/storage/audio/narrations/0b8c2738-aaaa-4ca2-94b9-9377948a31bb.wav",
+    "file:///Users/gauravpawar/Downloads/Hackathon/apps/api/storage/audio/narrations/f7cbf048-2748-410f-9046-3c31c9e34423.wav",
+    "file:///Users/gauravpawar/Downloads/Hackathon/apps/api/storage/audio/narrations/1f2a3564-dbb9-42b1-8939-50b96a9b8676.wav",
+    "file:///Users/gauravpawar/Downloads/Hackathon/apps/api/storage/audio/narrations/59fc9108-4021-49e7-8dc1-514a4cd6547a.wav",
+    "file:///Users/gauravpawar/Downloads/Hackathon/apps/api/storage/audio/narrations/5559f21c-acc0-444e-89e3-ff29ec6dae3d.wav",
+    "file:///Users/gauravpawar/Downloads/Hackathon/apps/api/storage/audio/narrations/65124e64-0e17-4d2d-a61a-c070f22dd941.wav"
+  ],
+  "music_url": "file:///Users/gauravpawar/Downloads/Hackathon/apps/api/storage/audio/music/4c46d2cc-77c3-417e-8831-d5c27ab3a4e7/focused.wav",
+  "scenes": [
+    {
+      "scene_id": "2c7b23c9-7637-411d-a32f-02f55315c789",
+      "title": "Introduction",
+      "duration_sec": 26
+    },
+    {
+      "scene_id": "0b8c2738-aaaa-4ca2-94b9-9377948a31bb",
+      "title": "[Synthetic]",
+      "duration_sec": 26
+    },
+    {
+      "scene_id": "f7cbf048-2748-410f-9046-3c31c9e34423",
+      "title": "Topic:",
+      "duration_sec": 26
+    },
+    {
+      "scene_id": "1f2a3564-dbb9-42b1-8939-50b96a9b8676",
+      "title": "Event-Driven",
+      "duration_sec": 26
+    },
+    {
+      "scene_id": "59fc9108-4021-49e7-8dc1-514a4cd6547a",
+      "title": "Architecture",
+      "duration_sec": 26
+    },
+    {
+      "scene_id": "5559f21c-acc0-444e-89e3-ff29ec6dae3d",
+      "title": "Worked Example",
+      "duration_sec": 30
+    },
+    {
+      "scene_id": "65124e64-0e17-4d2d-a61a-c070f22dd941",
+      "title": "Summary",
+      "duration_sec": 19
+    }
+  ],
+  "status": "final_ready"
+}
