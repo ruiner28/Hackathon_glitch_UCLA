@@ -1,0 +1,40 @@
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.api.routes import api_router
+from app.core.config import get_settings
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from app.db.session import init_db
+    await init_db()
+    yield
+
+
+def create_app() -> FastAPI:
+    settings = get_settings()
+
+    application = FastAPI(
+        title="VisualCS API",
+        description="Backend API for VisualCS — AI-powered CS video lesson generator",
+        version="0.1.0",
+        lifespan=lifespan,
+    )
+
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=[settings.FRONTEND_URL, "http://localhost:3000"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    application.include_router(api_router)
+
+    return application
+
+
+app = create_app()
