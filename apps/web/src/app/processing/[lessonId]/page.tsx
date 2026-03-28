@@ -12,6 +12,7 @@ import {
   getLesson,
   triggerExtract,
   triggerPlan,
+  triggerGenerateDiagram,
   triggerCompileScenes,
   triggerGenerateAssets,
   triggerRenderPreview,
@@ -57,6 +58,11 @@ export default function ProcessingPage({
         fn: () => triggerPlan(lessonId),
         status: "planning",
         message: "Creating pedagogical lesson plan...",
+      },
+      {
+        fn: () => triggerGenerateDiagram(lessonId).catch(() => null),
+        status: "diagram_generation",
+        message: "Generating primary architecture diagram...",
       },
       {
         fn: () => triggerCompileScenes(lessonId),

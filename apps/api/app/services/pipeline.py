@@ -1,6 +1,7 @@
 import logging
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,7 @@ from app.models.source_document import (
     SourceDocumentType,
 )
 from app.models.source_fragment import FragmentKind, SourceFragment
+from app.core.config import get_settings
 from app.providers.factory import (
     get_image_provider,
     get_llm_provider,
@@ -28,6 +30,7 @@ from app.providers.factory import (
 )
 from app.services.assembly.service import AssemblyService
 from app.services.compilation.service import CompilationService
+from app.services.diagram.service import DiagramService
 from app.services.evaluation.service import EvaluationService
 from app.services.extraction.service import ExtractionService
 from app.services.ingestion.service import IngestionService
@@ -81,6 +84,7 @@ class LessonPipeline:
         self.music = MusicService(self.music_provider, self.storage)
         self.assembly = AssemblyService(self.storage)
         self.evaluation = EvaluationService(self.llm)
+        self.diagram = DiagramService(self.llm)
 
         # Backward compat: store db if passed directly
         self._db = db
@@ -112,10 +116,23 @@ class LessonPipeline:
             if file_path and file_path.startswith("file://"):
                 file_path = file_path[7:]
 
+            # Topic-based lessons reuse an existing SourceDocument; must pass the topic string
+            # (extract_fragments(..., source_type="topic", topic=None) raises).
+            topic_arg: str | None = None
+            if source_doc.type == SourceDocumentType.topic:
+                topic_arg = (
+                    (lesson.input_topic or source_doc.title or lesson.title or "").strip()
+                    or None
+                )
+                if not topic_arg:
+                    raise ValueError(
+                        "Topic lesson is missing input_topic/title on the lesson or source document."
+                    )
+
             raw_fragments = await self.ingestion.extract_fragments(
                 source_type=source_doc.type.value,
                 file_path=file_path,
-                topic=None,
+                topic=topic_arg,
                 domain=lesson.domain.value,
                 doc_id=str(source_doc.id),
             )
@@ -257,6 +274,64 @@ class LessonPipeline:
         logger.info("Pipeline.run_planning: completed for lesson %s", lesson.id)
         return plan_data
 
+    def _is_diagram_topic(self, lesson: Lesson, plan: LessonPlan | None = None) -> bool:
+        """Decide whether this lesson should use the diagram-based path."""
+        topic = (lesson.input_topic or lesson.title or "").lower()
+        from app.services.diagram.rate_limiter import get_curated_diagram
+        if get_curated_diagram(topic):
+            return True
+        if lesson.domain and lesson.domain.value == "system_design":
+            return True
+        if plan and plan.plan_json:
+            sections = plan.plan_json.get("sections", [])
+            sys_types = {"system_design_graph", "primary_visual_walkthrough"}
+            if any(s.get("scene_type") in sys_types for s in sections):
+                return True
+        return False
+
+    async def run_diagram_generation(
+        self, db: AsyncSession, lesson: Lesson
+    ) -> tuple[dict, list[dict]] | None:
+        """Generate diagram spec + walkthrough states if topic qualifies.
+
+        Returns ``(diagram_spec, walkthrough_states)`` or ``None`` if
+        the lesson is not a diagram topic.
+        """
+        plan_result = await db.execute(
+            select(LessonPlan).where(LessonPlan.lesson_id == lesson.id)
+        )
+        plan = plan_result.scalar_one_or_none()
+
+        if not self._is_diagram_topic(lesson, plan):
+            logger.info(
+                "Pipeline.run_diagram_generation: skipped (not a diagram topic) lesson=%s",
+                lesson.id,
+            )
+            return None
+
+        topic = lesson.input_topic or lesson.title or ""
+        concepts = plan.concept_graph_json if plan else None
+        sections = (plan.plan_json or {}).get("sections", []) if plan else []
+
+        spec, states = await self.diagram.generate_full(topic, concepts, sections)
+
+        if plan:
+            plan.diagram_spec_json = spec
+            plan.walkthrough_states_json = states
+        else:
+            db.add(LessonPlan(
+                lesson_id=lesson.id,
+                diagram_spec_json=spec,
+                walkthrough_states_json=states,
+            ))
+        await db.flush()
+
+        logger.info(
+            "Pipeline.run_diagram_generation: spec + %d states for lesson %s",
+            len(states), lesson.id,
+        )
+        return spec, states
+
     async def run_scene_compilation(
         self, db: AsyncSession, lesson: Lesson
     ) -> list[Scene]:
@@ -278,7 +353,15 @@ class LessonPipeline:
             await db.delete(scene)
         await db.flush()
 
-        scene_specs = await self.compilation.compile(plan.plan_json, lesson.domain.value)
+        if plan.diagram_spec_json and plan.walkthrough_states_json:
+            topic = lesson.input_topic or lesson.title or lesson.domain.value
+            scene_specs = self.compilation.compile_from_diagram(
+                plan.diagram_spec_json,
+                plan.walkthrough_states_json,
+                topic,
+            )
+        else:
+            scene_specs = await self.compilation.compile(plan.plan_json, lesson.domain.value)
 
         scenes: list[Scene] = []
         for idx, spec in enumerate(scene_specs):
@@ -314,6 +397,161 @@ class LessonPipeline:
         )
         return scenes
 
+    async def _generate_diagram_assets(
+        self, db: AsyncSession, lesson: Lesson, scenes: list[Scene],
+    ) -> None:
+        """Generate SVG-to-PNG images + TTS narration for diagram walkthrough scenes.
+
+        Optionally generates one hero image (Gemini) for the first scene and
+        one short Veo clip (3-5s) for a dynamic scene if the providers are
+        available and the scene qualifies.
+        """
+        from app.services.diagram.renderer import render_svg_for_state, svg_to_png
+
+        plan_result = await db.execute(
+            select(LessonPlan).where(LessonPlan.lesson_id == lesson.id)
+        )
+        plan = plan_result.scalar_one_or_none()
+        if not plan or not plan.diagram_spec_json:
+            raise ValueError("Diagram spec missing on LessonPlan")
+
+        diagram_spec = plan.diagram_spec_json
+
+        scene_specs = [s.scene_spec_json or {} for s in scenes]
+        narrations = await self.narration.generate_all_narrations(
+            scene_specs, str(lesson.id),
+        )
+
+        hero_generated = False
+        veo_generated = False
+
+        for idx, (scene, narration_result) in enumerate(zip(scenes, narrations)):
+            scene.narration_text = narration_result["narration_text"]
+            scene.status = SceneStatus.generating
+
+            db.add(SceneAsset(
+                scene_id=scene.id,
+                asset_type=AssetType.audio,
+                provider="tts",
+                prompt_version="v1",
+                storage_url=narration_result["audio_url"],
+                metadata_json={
+                    "duration_sec": narration_result["duration_sec"],
+                    "type": "narration",
+                },
+                status=AssetStatus.ready,
+            ))
+
+            spec = scene.scene_spec_json or {}
+            walkthrough_state = spec.get("walkthrough_state", {})
+
+            svg_string = render_svg_for_state(diagram_spec, walkthrough_state)
+            png_bytes = svg_to_png(svg_string, width=1920, height=1080)
+
+            img_path = f"assets/{lesson.id}/{scene.id}/image.png"
+            img_url = await self.storage.put_file(img_path, png_bytes, "image/png")
+
+            db.add(SceneAsset(
+                scene_id=scene.id,
+                asset_type=AssetType.image,
+                provider="svg_renderer",
+                prompt_version="v1-diagram",
+                storage_url=img_url,
+                metadata_json={
+                    "state_id": walkthrough_state.get("state_id", ""),
+                    "renderer": "svg_diagram",
+                },
+                status=AssetStatus.ready,
+            ))
+
+            if idx == 0 and not hero_generated:
+                try:
+                    topic = diagram_spec.get("topic", lesson.title or "")
+                    comp_names = ", ".join(
+                        c.get("label", c.get("id", ""))
+                        for c in diagram_spec.get("components", [])
+                    )
+                    hero_prompt = (
+                        f"Create a clean technical architecture diagram that explains how a {topic} works in a modern backend system. "
+                        f"Style: professional system design diagram, white or light background, crisp vector look, "
+                        f"minimal but polished, blue/gray/green accents, readable labels, balanced spacing, "
+                        f"arrows clearly showing request flow. "
+                        f"Show these components from left to right: {comp_names}. "
+                        f"Demonstrate the working with two paths: an allowed request flow (green, 200 OK) and "
+                        f"a blocked request flow (red, 429 Too Many Requests). "
+                        f"Include visual annotations for the algorithm logic, per-user/per-IP request counting, "
+                        f"time window examples, counter increment, and counter reset. "
+                        f"Add a small side panel showing the internal logic steps. "
+                        f"Use modern architecture icons, soft shadows, rounded boxes, and directional arrows. "
+                        f"Make the diagram easy for an interviewer, engineer, or student to understand at a glance."
+                    )
+                    hero_bytes = await self.image_provider.generate_image(
+                        prompt=hero_prompt,
+                        style=lesson.style_preset.value,
+                        width=1920,
+                        height=1080,
+                    )
+                    if hero_bytes and len(hero_bytes) > 100:
+                        hero_path = f"assets/{lesson.id}/{scene.id}/hero.png"
+                        hero_url = await self.storage.put_file(
+                            hero_path, hero_bytes, "image/png",
+                        )
+                        db.add(SceneAsset(
+                            scene_id=scene.id,
+                            asset_type=AssetType.image,
+                            provider="image",
+                            prompt_version="v1-hero",
+                            storage_url=hero_url,
+                            metadata_json={"prompt": hero_prompt, "hero": True},
+                            status=AssetStatus.ready,
+                        ))
+                        hero_generated = True
+                        logger.info("Pipeline: hero image generated for lesson %s", lesson.id)
+                except Exception as hero_err:
+                    logger.warning("Hero image generation failed: %s", hero_err)
+
+            if (
+                not veo_generated
+                and walkthrough_state.get("overlay_mode")
+                and walkthrough_state.get("state_id", "").lower() not in ("overview", "summary")
+            ):
+                try:
+                    state_title = walkthrough_state.get("title", "")
+                    veo_prompt = (
+                        f"Short 3-second animation showing {state_title} in action. "
+                        f"Smooth camera, clean technical style, data flowing through system. "
+                        f"Professional educational visualization."
+                    )
+                    video_bytes = await self.video_provider.generate_from_text(
+                        prompt=veo_prompt, duration_sec=3.0,
+                    )
+                    if video_bytes and len(video_bytes) > 500:
+                        vid_path = f"assets/{lesson.id}/{scene.id}/veo.mp4"
+                        vid_url = await self.storage.put_file(
+                            vid_path, video_bytes, "video/mp4",
+                        )
+                        db.add(SceneAsset(
+                            scene_id=scene.id,
+                            asset_type=AssetType.video,
+                            provider="video",
+                            prompt_version="v1-diagram-veo",
+                            storage_url=vid_url,
+                            metadata_json={"prompt": veo_prompt, "diagram_veo": True},
+                            status=AssetStatus.ready,
+                        ))
+                        veo_generated = True
+                        logger.info("Pipeline: Veo clip generated for state %s", state_title)
+                except Exception as veo_err:
+                    logger.warning("Veo clip generation failed: %s", veo_err)
+
+            scene.status = SceneStatus.rendered
+
+        await db.flush()
+        logger.info(
+            "Pipeline._generate_diagram_assets: %d states, hero=%s, veo=%s for lesson %s",
+            len(scenes), hero_generated, veo_generated, lesson.id,
+        )
+
     async def run_asset_generation(
         self, db: AsyncSession, lesson: Lesson
     ) -> None:
@@ -327,6 +565,18 @@ class LessonPipeline:
             .order_by(Scene.scene_order)
         )
         scenes = result.scalars().all()
+
+        is_diagram = all(
+            s.scene_type == SceneType.primary_visual_walkthrough for s in scenes
+        ) and len(scenes) > 0
+
+        if is_diagram:
+            await self._generate_diagram_assets(db, lesson, scenes)
+            logger.info(
+                "Pipeline.run_asset_generation: diagram path for lesson %s",
+                lesson.id,
+            )
+            return
 
         from app.services import demo_cache as dc
 
@@ -802,6 +1052,31 @@ class LessonPipeline:
                     music_url,
                     lesson_id=str(lesson.id),
                 )
+
+        out_mp4 = (
+            Path(get_settings().LOCAL_STORAGE_PATH).resolve()
+            / "output"
+            / str(lesson.id)
+            / "lesson.mp4"
+        )
+        if not (out_mp4.is_file() and out_mp4.stat().st_size > 512):
+            job.status = RenderJobStatus.failed
+            job.progress = 0.0
+            job.error_message = (
+                "No MP4 was written. Install FFmpeg and ensure `ffmpeg` is on your PATH "
+                "(Render Final muxes scenes locally; it does not call the Gemini API). "
+                "Check API logs for encoding errors."
+            )
+            job.completed_at = datetime.now(timezone.utc)
+            lesson.status = LessonStatus.error
+            await db.flush()
+            await db.refresh(job)
+            logger.error(
+                "Pipeline.run_render: missing or empty output at %s (mode=%s)",
+                out_mp4,
+                mode,
+            )
+            return video_url
 
         job.status = RenderJobStatus.completed
         job.progress = 100.0

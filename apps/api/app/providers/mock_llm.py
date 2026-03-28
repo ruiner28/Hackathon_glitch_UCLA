@@ -1046,6 +1046,25 @@ _QUIZZES: dict[str, list[dict]] = {
 }
 
 
+def _planning_topic_match_key(concepts: dict, domain: str) -> str | None:
+    """
+    Resolve which curated _LESSON_PLANS key applies.
+
+    Pipeline passes ``domain`` as the lesson enum (``cs``, ``system_design``), not the
+    user's topic string, so we also scan concept graph labels and title.
+    """
+    hint_parts = [domain, concepts.get("title") or ""]
+    cg = concepts.get("concept_graph")
+    if isinstance(cg, dict):
+        nodes = cg.get("nodes") or []
+    else:
+        nodes = concepts.get("nodes") or []
+    for node in nodes[:16]:
+        if isinstance(node, dict) and node.get("label"):
+            hint_parts.append(str(node["label"]))
+    return _match_topic(" ".join(hint_parts))
+
+
 def _match_topic(text: str) -> str | None:
     """Find which mock topic best matches the input text."""
     normalised = text.lower()
@@ -1663,7 +1682,7 @@ class MockLLMProvider(LLMProvider):
                         sections[nid] = node.get("description", "")
             return _build_paper_lesson_plan(paper_title, sections, concepts)
 
-        topic = _match_topic(domain)
+        topic = _planning_topic_match_key(concepts, domain)
         if topic and topic in _LESSON_PLANS:
             logger.info("MockLLM: create_lesson_plan matched topic '%s'", topic)
             return _LESSON_PLANS[topic]

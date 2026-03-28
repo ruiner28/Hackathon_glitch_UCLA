@@ -20,6 +20,7 @@ const initialProcessingStatus: ProcessingStatus = {
   steps: {
     extraction: "pending",
     planning: "pending",
+    diagram_generation: "pending",
     scene_compilation: "pending",
     asset_generation: "pending",
     rendering: "pending",
@@ -71,20 +72,28 @@ const statusStepMap: Record<string, { step: ProcessingStep; status: StepStatus }
     { step: "extraction", status: "complete" },
     { step: "planning", status: "active" },
   ],
+  diagram_generation: [
+    { step: "extraction", status: "complete" },
+    { step: "planning", status: "complete" },
+    { step: "diagram_generation", status: "active" },
+  ],
   compiling: [
     { step: "extraction", status: "complete" },
     { step: "planning", status: "complete" },
+    { step: "diagram_generation", status: "complete" },
     { step: "scene_compilation", status: "active" },
   ],
   generating_assets: [
     { step: "extraction", status: "complete" },
     { step: "planning", status: "complete" },
+    { step: "diagram_generation", status: "complete" },
     { step: "scene_compilation", status: "complete" },
     { step: "asset_generation", status: "active" },
   ],
   rendering: [
     { step: "extraction", status: "complete" },
     { step: "planning", status: "complete" },
+    { step: "diagram_generation", status: "complete" },
     { step: "scene_compilation", status: "complete" },
     { step: "asset_generation", status: "complete" },
     { step: "rendering", status: "active" },
@@ -92,6 +101,7 @@ const statusStepMap: Record<string, { step: ProcessingStep; status: StepStatus }
   completed: [
     { step: "extraction", status: "complete" },
     { step: "planning", status: "complete" },
+    { step: "diagram_generation", status: "complete" },
     { step: "scene_compilation", status: "complete" },
     { step: "asset_generation", status: "complete" },
     { step: "rendering", status: "complete" },
@@ -105,6 +115,7 @@ const statusMessages: Record<string, string> = {
   created: "Lesson created, ready to process...",
   extracting: "Extracting concepts from source material...",
   planning: "Creating pedagogical lesson plan...",
+  diagram_generation: "Generating primary diagram...",
   compiling: "Compiling scene specifications...",
   generating_assets: "Generating narration and visual assets...",
   rendering: "Rendering video...",
@@ -116,6 +127,7 @@ export function mapLessonStatusToProcessing(status: string): ProcessingStatus {
   const steps: Record<ProcessingStep, StepStatus> = {
     extraction: "pending",
     planning: "pending",
+    diagram_generation: "pending",
     scene_compilation: "pending",
     asset_generation: "pending",
     rendering: "pending",
@@ -129,6 +141,7 @@ export function mapLessonStatusToProcessing(status: string): ProcessingStatus {
   const allSteps: ProcessingStep[] = [
     "extraction",
     "planning",
+    "diagram_generation",
     "scene_compilation",
     "asset_generation",
     "rendering",

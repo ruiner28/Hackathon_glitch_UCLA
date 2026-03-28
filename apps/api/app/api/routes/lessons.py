@@ -4,11 +4,12 @@ from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import get_settings
 from app.core.deps import get_db
 from app.models.evaluation_report import EvaluationReport
 from app.models.lesson import Lesson, LessonDomain, LessonStatus, LessonStylePreset
@@ -30,6 +31,7 @@ from app.schemas.responses import (
     TranscriptResponse,
     TranscriptSceneEntry,
 )
+from app.services.diagram.renderer import render_svg, render_svg_for_state
 from app.services.pipeline import LessonPipeline
 
 router = APIRouter()
@@ -367,19 +369,11 @@ async def get_quiz(lesson_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 def _find_video_path(lesson_id: UUID) -> Path | None:
-    """Locate the rendered MP4 for a lesson in local storage."""
-    candidates = [
-        Path("./storage/output") / str(lesson_id) / "lesson.mp4",
-        Path("./storage") / "output" / str(lesson_id) / "lesson.mp4",
-    ]
-    for p in candidates:
-        if p.exists() and p.stat().st_size > 0:
-            return p
-    renders_dir = Path("./storage/renders")
-    if renders_dir.exists():
-        mp4s = sorted(renders_dir.rglob("lesson.mp4"), key=lambda f: f.stat().st_mtime, reverse=True)
-        if mp4s:
-            return mp4s[0]
+    """Locate the rendered MP4 for a lesson (same base path LocalStorageProvider uses)."""
+    base = Path(get_settings().LOCAL_STORAGE_PATH).resolve()
+    p = base / "output" / str(lesson_id) / "lesson.mp4"
+    if p.is_file() and p.stat().st_size > 0:
+        return p
     return None
 
 
@@ -456,18 +450,99 @@ async def get_scene_interactions(lesson_id: UUID, db: AsyncSession = Depends(get
 @router.get("/lessons/{lesson_id}/subtitles")
 async def get_subtitles(lesson_id: UUID, db: AsyncSession = Depends(get_db)):
     await _get_lesson_or_404(lesson_id, db)
-    candidates = [
+    base = Path(get_settings().LOCAL_STORAGE_PATH).resolve()
+    p = base / "output" / str(lesson_id) / "subtitles.srt"
+    if p.is_file():
+        return FileResponse(
+            path=str(p),
+            media_type="text/plain",
+            headers={"Content-Type": "text/plain; charset=utf-8"},
+        )
+    for legacy in (
         Path("./storage/output") / str(lesson_id) / "subtitles.srt",
         Path("./storage") / "output" / str(lesson_id) / "subtitles.srt",
-    ]
-    for p in candidates:
-        if p.exists():
+    ):
+        if legacy.exists():
             return FileResponse(
-                path=str(p),
+                path=str(legacy),
                 media_type="text/plain",
                 headers={"Content-Type": "text/plain; charset=utf-8"},
             )
     raise HTTPException(status_code=404, detail="Subtitles not yet generated.")
+
+
+@router.get("/lessons/{lesson_id}/diagram")
+async def get_diagram_svg(
+    lesson_id: UUID,
+    state_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the primary visual SVG for a lesson.
+
+    Optional ``state_id`` query param renders a specific walkthrough state
+    (with highlights/dims).  Without it, the full diagram is returned.
+    """
+    await _get_lesson_or_404(lesson_id, db)
+    plan_result = await db.execute(
+        select(LessonPlan).where(LessonPlan.lesson_id == lesson_id)
+    )
+    plan = plan_result.scalar_one_or_none()
+    if not plan or not plan.diagram_spec_json:
+        raise HTTPException(status_code=404, detail="No diagram spec for this lesson")
+
+    spec = plan.diagram_spec_json
+
+    if state_id and plan.walkthrough_states_json:
+        state = next(
+            (s for s in plan.walkthrough_states_json if s.get("state_id") == state_id),
+            None,
+        )
+        if not state:
+            raise HTTPException(status_code=404, detail=f"Walkthrough state '{state_id}' not found")
+        svg = render_svg_for_state(spec, state, include_css_animation=True)
+    else:
+        svg = render_svg(spec)
+
+    return Response(content=svg, media_type="image/svg+xml")
+
+
+@router.get("/lessons/{lesson_id}/diagram-data")
+async def get_diagram_data(
+    lesson_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the raw diagram spec and walkthrough states as JSON."""
+    await _get_lesson_or_404(lesson_id, db)
+    plan_result = await db.execute(
+        select(LessonPlan).where(LessonPlan.lesson_id == lesson_id)
+    )
+    plan = plan_result.scalar_one_or_none()
+    if not plan or not plan.diagram_spec_json:
+        raise HTTPException(status_code=404, detail="No diagram spec for this lesson")
+
+    return {
+        "diagram_spec": plan.diagram_spec_json,
+        "walkthrough_states": plan.walkthrough_states_json or [],
+    }
+
+
+@router.post("/lessons/{lesson_id}/generate-diagram")
+async def generate_diagram(lesson_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Trigger diagram spec + walkthrough generation for a lesson."""
+    lesson = await _get_lesson_or_404(lesson_id, db)
+    pipeline = LessonPipeline(db)
+    result = await pipeline.run_diagram_generation(db, lesson)
+    if result is None:
+        raise HTTPException(
+            status_code=400,
+            detail="This lesson topic does not qualify for diagram generation.",
+        )
+    spec, states = result
+    return {
+        "diagram_spec": spec,
+        "walkthrough_states": states,
+        "state_count": len(states),
+    }
 
 
 @router.get("/lessons/{lesson_id}/download")
