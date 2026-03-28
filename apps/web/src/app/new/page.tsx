@@ -48,6 +48,13 @@ const topicSchema = z.object({
 
 type TopicFormData = z.infer<typeof topicSchema>;
 
+/** Match homepage featured demos so URL ?topic=… picks the right domain. */
+const SHOWCASE_TOPIC_DOMAIN: Record<string, string> = {
+  "Rate Limiter": "system_design",
+  "OS Deadlock": "cs_concepts",
+  "Compiler Bottom-Up Parsing": "cs_concepts",
+};
+
 function NewLessonContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -70,7 +77,9 @@ function NewLessonContent() {
     resolver: zodResolver(topicSchema),
     defaultValues: {
       topic: prefilledTopic,
-      domain: "cs_concepts",
+      domain:
+        (prefilledTopic && SHOWCASE_TOPIC_DOMAIN[prefilledTopic]) ||
+        "cs_concepts",
       style_preset: "clean_academic",
       duration_seconds: 120,
       music_enabled: true,
@@ -78,6 +87,7 @@ function NewLessonContent() {
   });
 
   const currentTopic = watch("topic");
+  const currentDomain = watch("domain");
   const currentDuration = watch("duration_seconds");
   const musicEnabled = watch("music_enabled");
 
@@ -214,7 +224,7 @@ function NewLessonContent() {
                         <div className="space-y-2">
                           <Label>Domain</Label>
                           <Select
-                            defaultValue="cs_concepts"
+                            value={currentDomain}
                             onValueChange={(v) => setValue("domain", v)}
                           >
                             <SelectTrigger>

@@ -1,21 +1,111 @@
-export const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+function _isLocalBackendUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.hostname === "localhost" || u.hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Base URL for FastAPI JSON/media calls.
+ * - **Browser, local dev:** empty string → fetch same-origin `/api/...` (Next.js rewrites to FastAPI). Avoids CORS and flaky `localhost`/`::1` issues.
+ * - **Browser, remote API:** `NEXT_PUBLIC_API_URL` when it points to a non-local host.
+ * - **Server (RSC):** direct URL to FastAPI (rewrites do not apply to server `fetch`).
+ */
+export function getApiBase(): string {
+  if (typeof window !== "undefined") {
+    const raw = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+    if (raw && !_isLocalBackendUrl(raw)) {
+      return raw;
+    }
+    return "";
+  }
+  return (
+    process.env.API_INTERNAL_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://127.0.0.1:8000"
+  ).replace(/\/$/, "");
+}
+
+/** Parse FastAPI/Starlette JSON errors or HTML fallback pages into a short string. */
+function parseApiErrorBody(errorBody: string): string {
+  const trimmed = errorBody.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const data = JSON.parse(trimmed) as {
+        detail?: unknown;
+        traceback?: string;
+        message?: string;
+      };
+      let msg = "";
+      if (typeof data.detail === "string") {
+        msg = data.detail;
+      } else if (Array.isArray(data.detail)) {
+        msg = data.detail
+          .map((d: unknown) =>
+            typeof d === "object" && d !== null && "msg" in d
+              ? String((d as { msg: string }).msg)
+              : JSON.stringify(d)
+          )
+          .join("; ");
+      } else if (data.detail != null) {
+        msg = JSON.stringify(data.detail);
+      } else if (typeof data.message === "string") {
+        msg = data.message;
+      } else {
+        msg = trimmed;
+      }
+      if (
+        typeof data.traceback === "string" &&
+        process.env.NODE_ENV === "development"
+      ) {
+        msg = `${msg}\n\n${data.traceback.slice(0, 4000)}`;
+      }
+      return msg || trimmed;
+    } catch {
+      return trimmed.slice(0, 2000);
+    }
+  }
+  if (trimmed.includes("<!DOCTYPE") || trimmed.includes("<html")) {
+    const title = trimmed.match(/<title>([^<]+)<\/title>/i);
+    if (title) {
+      return `Server returned HTML: ${title[1]}. Often means the Next.js proxy could not reach FastAPI — confirm pnpm dev:api and restart Next.`;
+    }
+    return "Server returned an HTML error page. Check the API terminal and that port 8000 is reachable from Next.js rewrites.";
+  }
+  return trimmed.slice(0, 2000);
+}
 
 async function request<T>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
-    ...options,
-  });
+  const base = getApiBase();
+  const label = base || `${typeof window !== "undefined" ? window.location.origin : ""} → FastAPI`;
+  let res: Response;
+  try {
+    res = await fetch(`${base}${path}`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+      ...options,
+    });
+  } catch (err) {
+    const msg =
+      err instanceof Error ? err.message : "Network error";
+    const hint =
+      /hang up|ECONNRESET|ECONNREFUSED|Failed to fetch/i.test(msg)
+        ? " From repo root run `pnpm dev` (starts API + Next) or a second terminal: `pnpm dev:api`. Also check `API_INTERNAL_URL` in next.config."
+        : " Start the API (`pnpm dev:api` or `pnpm dev` from repo root), restart Next after changing next.config, or set API_INTERNAL_URL for rewrites.";
+    throw new Error(`${msg} (${label}).${hint}`);
+  }
 
   if (!res.ok) {
     const errorBody = await res.text().catch(() => "Unknown error");
-    throw new Error(`API Error ${res.status}: ${errorBody}`);
+    const message = parseApiErrorBody(errorBody);
+    throw new Error(`API Error ${res.status}: ${message}`);
   }
 
   return res.json();
@@ -25,10 +115,17 @@ export async function uploadFile(file: File): Promise<{ id: string; title: strin
   const formData = new FormData();
   formData.append("file", file);
 
-  const res = await fetch(`${API_BASE}/api/uploads`, {
-    method: "POST",
-    body: formData,
-  });
+  const base = getApiBase();
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/uploads`, {
+      method: "POST",
+      body: formData,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Network error";
+    throw new Error(`${msg} — is the API running?`);
+  }
 
   if (!res.ok) {
     throw new Error(`Upload failed: ${res.status}`);
@@ -214,15 +311,34 @@ export async function triggerGenerateAssets(lessonId: string) {
 }
 
 export async function triggerRenderPreview(lessonId: string) {
-  return request(`/api/lessons/${lessonId}/render-preview`, {
+  const job = await request<{
+    status: string;
+    error_message?: string | null;
+  }>(`/api/lessons/${lessonId}/render-preview`, {
     method: "POST",
   });
+  if (job.status === "failed") {
+    throw new Error(
+      job.error_message || "Preview render failed — check API logs and FFmpeg."
+    );
+  }
+  return job;
 }
 
 export async function triggerRenderFinal(lessonId: string) {
-  return request(`/api/lessons/${lessonId}/render-final`, {
+  const job = await request<{
+    status: string;
+    error_message?: string | null;
+  }>(`/api/lessons/${lessonId}/render-final`, {
     method: "POST",
   });
+  if (job.status === "failed") {
+    throw new Error(
+      job.error_message ||
+        "Final render failed — FFmpeg is required locally; Gemini is not used for this step."
+    );
+  }
+  return job;
 }
 
 export async function triggerEvaluate(lessonId: string) {
@@ -303,16 +419,16 @@ export async function getSceneInteractions(lessonId: string) {
 }
 
 export function getVideoUrl(lessonId: string): string {
-  return `${API_BASE}/api/lessons/${lessonId}/video`;
+  return `${getApiBase()}/api/lessons/${lessonId}/video`;
 }
 
 export function getSubtitlesUrl(lessonId: string): string {
-  return `${API_BASE}/api/lessons/${lessonId}/subtitles`;
+  return `${getApiBase()}/api/lessons/${lessonId}/subtitles`;
 }
 
 export async function checkSubtitlesReady(lessonId: string): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/api/lessons/${lessonId}/subtitles`, {
+    const res = await fetch(`${getApiBase()}/api/lessons/${lessonId}/subtitles`, {
       method: "HEAD",
     });
     return res.ok;
@@ -323,7 +439,7 @@ export async function checkSubtitlesReady(lessonId: string): Promise<boolean> {
 
 export async function checkVideoReady(lessonId: string): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/api/lessons/${lessonId}/video`, {
+    const res = await fetch(`${getApiBase()}/api/lessons/${lessonId}/video`, {
       method: "HEAD",
     });
     return res.ok;
@@ -333,7 +449,7 @@ export async function checkVideoReady(lessonId: string): Promise<boolean> {
 }
 
 export async function downloadLesson(lessonId: string) {
-  const url = `${API_BASE}/api/lessons/${lessonId}/download`;
+  const url = `${getApiBase()}/api/lessons/${lessonId}/download`;
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`Download failed: ${res.status}`);
@@ -359,7 +475,51 @@ export async function downloadLesson(lessonId: string) {
 export async function runFullPipeline(lessonId: string) {
   await triggerExtract(lessonId);
   await triggerPlan(lessonId);
+  await triggerGenerateDiagram(lessonId).catch(() => {});
   await triggerCompileScenes(lessonId);
   await triggerGenerateAssets(lessonId);
   await triggerRenderPreview(lessonId);
+}
+
+export interface DiagramData {
+  diagram_spec: Record<string, unknown>;
+  walkthrough_states: WalkthroughState[];
+}
+
+export interface WalkthroughState {
+  state_id: string;
+  title: string;
+  narration: string;
+  focus_regions: string[];
+  highlight_paths: string[];
+  dim_regions: string[];
+  overlay_mode: string | null;
+  duration_sec: number;
+  user_question_hooks?: string[];
+}
+
+export async function getDiagramData(lessonId: string): Promise<DiagramData> {
+  return request<DiagramData>(`/api/lessons/${lessonId}/diagram-data`);
+}
+
+export function getDiagramSvgUrl(lessonId: string, stateId?: string): string {
+  const base = `${getApiBase()}/api/lessons/${lessonId}/diagram`;
+  if (stateId) return `${base}?state_id=${encodeURIComponent(stateId)}`;
+  return base;
+}
+
+export function getLiveWebSocketUrl(lessonId: string): string {
+  const base = getApiBase() || "http://127.0.0.1:8000";
+  return base.replace(/^http/, "ws").replace(/\/$/, "") +
+    `/api/lessons/${lessonId}/live`;
+}
+
+export async function triggerGenerateDiagram(lessonId: string) {
+  return request<{
+    diagram_spec: Record<string, unknown>;
+    walkthrough_states: WalkthroughState[];
+    state_count: number;
+  }>(`/api/lessons/${lessonId}/generate-diagram`, {
+    method: "POST",
+  });
 }

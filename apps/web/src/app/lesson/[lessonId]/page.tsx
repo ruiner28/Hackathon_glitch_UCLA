@@ -7,10 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SceneCard } from "@/components/lesson/scene-card";
 import { SceneEditor } from "@/components/lesson/scene-editor";
+import { DiagramViewer } from "@/components/lesson/diagram-viewer";
+import { LiveChat } from "@/components/lesson/live-chat";
 import {
-  API_BASE,
+  getApiBase,
   getLesson,
   getLessonScenes,
+  getDiagramData,
   updateScene,
   regenerateScene,
   regenerateSceneAssets,
@@ -55,8 +58,10 @@ export default function LessonEditorPage({
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isRegeneratingAssets, setIsRegeneratingAssets] = useState(false);
   const [isRendering, setIsRendering] = useState(false);
+  const [renderError, setRenderError] = useState<string | null>(null);
   const [stylePreset, setStylePreset] = useState("clean_academic");
   const [isChangingStyle, setIsChangingStyle] = useState(false);
+  const [hasDiagram, setHasDiagram] = useState(false);
 
   const selectedScene = scenes.find((s) => s.id === selectedSceneId) || null;
 
@@ -73,6 +78,9 @@ export default function LessonEditorPage({
         if (lessonScenes.length > 0) {
           selectScene(lessonScenes[0].id);
         }
+        getDiagramData(lessonId)
+          .then(() => setHasDiagram(true))
+          .catch(() => setHasDiagram(false));
       } catch (err) {
         console.error("Failed to load lesson:", err);
       } finally {
@@ -181,11 +189,15 @@ export default function LessonEditorPage({
 
   async function handleRenderFinal() {
     setIsRendering(true);
+    setRenderError(null);
     try {
       await triggerRenderFinal(lessonId);
       router.push(`/lesson/${lessonId}/output`);
     } catch (err) {
       console.error("Failed to render:", err);
+      setRenderError(
+        err instanceof Error ? err.message : "Render failed. Check the API terminal logs."
+      );
       setIsRendering(false);
     }
   }
@@ -229,7 +241,12 @@ export default function LessonEditorPage({
               </div>
               <Badge variant="outline">{currentLesson?.status}</Badge>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-2">
+              {renderError && (
+                <p className="text-xs text-destructive max-w-[min(100%,20rem)] text-right sm:order-last sm:mr-2">
+                  {renderError}
+                </p>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -301,11 +318,17 @@ export default function LessonEditorPage({
           {/* Center - Preview */}
           <div className="flex-1 overflow-y-auto">
             <div className="p-6">
+              {hasDiagram ? (
+                <DiagramViewer
+                  lessonId={lessonId}
+                  className="mb-6"
+                />
+              ) : (
               <div className="aspect-video rounded-lg bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center mb-6 shadow-inner overflow-hidden relative">
                 {selectedScene?.preview_image_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={`${API_BASE.replace(/\/$/, "")}${selectedScene.preview_image_url}`}
+                    src={`${getApiBase().replace(/\/$/, "")}${selectedScene.preview_image_url}`}
                     alt=""
                     className="absolute inset-0 h-full w-full object-cover object-center opacity-90"
                     onError={(e) => {
@@ -324,6 +347,7 @@ export default function LessonEditorPage({
                   </p>
                 </div>
               </div>
+              )}
 
               {selectedScene && (
                 <div className="rounded-lg border bg-card p-4">
@@ -460,6 +484,8 @@ export default function LessonEditorPage({
             </div>
           </aside>
         </div>
+
+        {hasDiagram && <LiveChat lessonId={lessonId} />}
       </main>
     </>
   );

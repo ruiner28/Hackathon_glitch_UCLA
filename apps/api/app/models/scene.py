@@ -16,6 +16,7 @@ class SceneType(str, enum.Enum):
     code_trace = "code_trace"
     system_design_graph = "system_design_graph"
     summary_scene = "summary_scene"
+    primary_visual_walkthrough = "primary_visual_walkthrough"
 
 
 class SceneStatus(str, enum.Enum):

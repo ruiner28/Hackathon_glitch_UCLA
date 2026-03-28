@@ -68,6 +68,8 @@ class LessonPlanResponse(BaseModel):
     misconceptions_json: list | None = None
     lesson_objectives_json: list | None = None
     plan_json: dict | None = None
+    diagram_spec_json: dict | None = None
+    walkthrough_states_json: list | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

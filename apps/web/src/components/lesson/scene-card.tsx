@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { API_BASE } from "@/lib/api";
+import { getApiBase } from "@/lib/api";
 import { sceneWillUseVeo } from "@/lib/scene-spec";
 import { Clock, Clapperboard, ImageIcon } from "lucide-react";
 import type { Scene } from "@/types";
@@ -13,6 +13,7 @@ const sceneTypeColors: Record<string, string> = {
   code_trace: "bg-green-100 text-green-800",
   system_design_graph: "bg-amber-100 text-amber-800",
   summary_scene: "bg-slate-100 text-slate-800",
+  primary_visual_walkthrough: "bg-teal-100 text-teal-800",
 };
 
 const sceneTypeLabels: Record<string, string> = {
@@ -22,6 +23,7 @@ const sceneTypeLabels: Record<string, string> = {
   code_trace: "Code Trace",
   system_design_graph: "System Design",
   summary_scene: "Summary",
+  primary_visual_walkthrough: "Walkthrough",
 };
 
 interface SceneCardProps {
@@ -47,7 +49,7 @@ export function SceneCard({ scene, isSelected, onClick }: SceneCardProps) {
     : null;
   const thumb =
     scene.preview_image_url &&
-    `${API_BASE.replace(/\/$/, "")}${scene.preview_image_url.startsWith("/") ? "" : "/"}${scene.preview_image_url}`;
+    `${getApiBase().replace(/\/$/, "")}${scene.preview_image_url.startsWith("/") ? "" : "/"}${scene.preview_image_url}`;
   const useVeo = sceneWillUseVeo(scene);
 
   return (

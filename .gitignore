@@ -14,3 +14,13 @@ generated/
 *.wav
 *.mp3
 .DS_Store
+
+# pnpm content-addressable store
+.pnpm-store/
+
+# Generated lesson assets
+storage/
+apps/api/storage/
+
+# Local SQLite DB (no Docker)
+apps/api/*.db

@@ -88,7 +88,15 @@ The repo includes `pnpm-workspace.yaml` with `apps/web` and `packages/*` (curren
 
 ### Database
 
-From the **repository root** (or any directory, adjusting paths), start PostgreSQL:
+**Without Docker (recommended for local dev):** use **SQLite** so nothing listens on port 5432. Copy `.env.example` to the repo root `.env` and keep:
+
+```bash
+DATABASE_URL=sqlite+aiosqlite:///./visualcs.db
+```
+
+Run the API from `apps/api` (as `pnpm dev:api` does) so the database file is created at `apps/api/visualcs.db`. Tables are created on API startup (`init_db`).
+
+**With PostgreSQL** (optional): start Postgres, then point `DATABASE_URL` at it:
 
 ```bash
 docker compose up postgres -d
@@ -113,7 +121,16 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 Open **http://localhost:8000/docs** for interactive OpenAPI.
 
-### Run the frontend
+### Run the frontend (or full stack from repo root)
+
+From the **repository root**, one command starts **FastAPI (8000)** and **Next.js (3000)**:
+
+```bash
+pnpm install   # root — pulls web + tooling including concurrently
+pnpm dev
+```
+
+Use **`pnpm dev:web`** if you only need the UI and will point it at another API URL.
 
 ```bash
 cd apps/web
@@ -123,6 +140,10 @@ pnpm dev
 ```
 
 Open **http://localhost:3000**.
+
+If the browser or Next logs show **`Failed to proxy … 127.0.0.1:8000`** or **`ECONNRESET`**, either the API is not running on port 8000 (use **`pnpm dev`** from the root or **`pnpm dev:api`**), or a pipeline step ran longer than the old proxy limit — the app config raises the Next.js dev **proxy timeout** so **`compile-scenes`** and other LLM calls can finish.
+
+If you still use **PostgreSQL in Docker** while the API runs on the host, ensure `DATABASE_URL` matches a reachable host (often `localhost`, not the Docker service name).
 
 ### Docker Compose (full stack)
 
