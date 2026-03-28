@@ -1,0 +1,155 @@
+1
+00:00:03,000 --> 00:00:07,900
+Parsing is the crucial compiler phase that determines if a sequence of tokens conforms to a language's grammar. While
+
+2
+00:00:08,000 --> 00:00:12,900
+top-down parsers predict the structure from the start symbol, bottom-up parsers build the parse tree from the input
+
+3
+00:00:13,000 --> 00:00:17,899
+tokens, gradually reducing substrings to non-terminals until the start symbol is reached. This process essentially
+
+4
+00:00:18,000 --> 00:00:22,899
+reverses a rightmost derivation.
+
+5
+00:00:24,500 --> 00:00:28,399
+Context-Free Grammars provide the rules our parser will follow. In bottom-up parsing, the core operation is finding a
+
+6
+00:00:28,500 --> 00:00:32,399
+'handle' – a specific substring in our current form that matches a production rule's right-hand side and can be
+
+7
+00:00:32,500 --> 00:00:36,399
+correctly reduced to its left-hand side non-terminal. This handle represents a pivotal point for reduction, ensuring we
+
+8
+00:00:36,500 --> 00:00:40,399
+reverse the rightmost derivation correctly. We often augment the grammar with a new start symbol to simplify parsing
+
+9
+00:00:40,500 --> 00:00:44,399
+completion.
+
+10
+00:00:46,000 --> 00:00:51,899
+Shift-reduce parsing is the most common bottom-up technique. It employs two main components: a parsing stack, which
+
+11
+00:00:52,000 --> 00:00:57,899
+accumulates processed symbols and states, and an input buffer, holding the remaining tokens. The parser operates in a
+
+12
+00:00:58,000 --> 00:01:03,899
+loop, performing one of four actions: 'Shift', where it moves the next input token to the stack; 'Reduce', where it
+
+13
+00:01:04,000 --> 00:01:09,900
+identifies a handle on top of the stack and replaces it with the corresponding non-terminal; 'Accept', indicating
+
+14
+00:01:10,000 --> 00:01:15,900
+successful parsing; or 'Error', if no valid action is found.
+
+15
+00:01:17,500 --> 00:01:23,400
+Let's trace a simple arithmetic expression, 'id + id * id', through a shift-reduce parser. We begin with an empty stack
+
+16
+00:01:23,500 --> 00:01:29,400
+and the full input. The parser will strategically 'shift' tokens onto the stack until a 'handle' is formed. Once a
+
+17
+00:01:29,500 --> 00:01:35,400
+handle is recognized, a 'reduce' action replaces that sequence of symbols on the stack with its corresponding
+
+18
+00:01:35,500 --> 00:01:41,400
+non-terminal. This cycle of shifting and reducing continues, gradually transforming the input tokens into higher-level
+
+19
+00:01:41,500 --> 00:01:47,400
+grammatical constructs, until only the start symbol remains on the stack and the input is exhausted.
+
+20
+00:01:49,000 --> 00:01:52,900
+While simple shift-reduce is intuitive, it often encounters ambiguities, such as whether to 'shift' the next token or
+
+21
+00:01:53,000 --> 00:01:56,900
+'reduce' the symbols on the stack. These 'shift-reduce' or 'reduce-reduce' conflicts require a more sophisticated
+
+22
+00:01:57,000 --> 00:02:00,900
+approach. This is where LR parsers come in. LR parsers are a family of powerful bottom-up parsers that use a fixed
+
+23
+00:02:01,000 --> 00:02:04,900
+number of 'lookahead' symbols from the input to deterministically make parsing decisions, scanning left-to-right to
+
+24
+00:02:05,000 --> 00:02:08,900
+produce a rightmost derivation in reverse.
+
+25
+00:02:10,500 --> 00:02:14,400
+LR parsers are driven by a 'parsing table,' a crucial component built during compiler design. This table is constructed
+
+26
+00:02:14,500 --> 00:02:18,400
+by analyzing the grammar to create a 'DFA of viable prefixes,' a finite automaton whose states are collections of 'LR
+
+27
+00:02:18,500 --> 00:02:22,400
+items'. An LR item, like 'A → α.β', indicates how much of a production we've seen so far. Operations like 'Closure' and
+
+28
+00:02:22,500 --> 00:02:26,400
+'GOTO' systematically expand these item sets and define transitions between states, ultimately populating the 'Action'
+
+29
+00:02:26,500 --> 00:02:30,400
+and 'GOTO' tables that guide the parser's decisions at runtime.
+
+30
+00:02:32,000 --> 00:02:35,900
+The LR family includes several types, each offering a trade-off between parsing power and table size. LR(0) is the
+
+31
+00:02:36,000 --> 00:02:39,900
+simplest, without lookahead for reductions. SLR(1) improves upon this by using FOLLOW sets to guide reduce decisions.
+
+32
+00:02:40,000 --> 00:02:43,900
+Canonical LR(1) is the most powerful, resolving the most conflicts by maintaining detailed lookahead information, but
+
+33
+00:02:44,000 --> 00:02:47,900
+creates large tables. LALR(1) strikes a practical balance, merging LR(1) states with identical 'cores' to produce
+
+34
+00:02:48,000 --> 00:02:51,900
+smaller tables while retaining significant power, making it a popular choice for tools like YACC and Bison.
+
+35
+00:02:53,500 --> 00:02:57,400
+In summary, bottom-up parsing is a fundamental technique in compiler construction, building syntactic structure from
+
+36
+00:02:57,500 --> 00:03:01,400
+the ground up by reducing tokens to higher-level grammar symbols. Shift-reduce parsing, particularly with the
+
+37
+00:03:01,500 --> 00:03:05,400
+deterministic power of LR parsers, offers efficiency and robust error detection. This powerful approach is not just
+
+38
+00:03:05,500 --> 00:03:09,400
+academic; it underpins how modern compilers process your code, how domain-specific languages are understood, and how
+
+39
+00:03:09,500 --> 00:03:13,400
+syntax checkers ensure the correctness of your programs.

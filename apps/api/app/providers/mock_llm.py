@@ -3,8 +3,18 @@ import re
 import uuid
 
 from app.providers.base import LLMProvider
+from app.services.visual_system import (
+    VEO_DURATION_MAX,
+    build_nano_banana_prompt,
+    build_veo_prompt,
+    pick_veo_duration_sec,
+    score_veo_eligibility,
+)
+from app.services.visual_system.style_presets import VISUAL_IDENTITY_TOKEN
 
 logger = logging.getLogger(__name__)
+
+CONTINUITY_MOTIF_RATE_LIMIT = "teal gateway orb filtering amber request particles"
 
 # ---------------------------------------------------------------------------
 # Concept-graph databases keyed by normalised topic substring
@@ -487,13 +497,14 @@ _LESSON_PLANS: dict[str, dict] = {
     },
     "rate limit": {
         "lesson_title": "Rate Limiter System Design",
+        "style_preset": "clean_academic",
         "target_audience": "undergraduate CS student",
-        "estimated_duration_sec": 320,
+        "estimated_duration_sec": 300,
         "objectives": [
-            "Explain why rate limiting is essential for API reliability",
-            "Compare token-bucket, leaky-bucket, and sliding-window algorithms",
-            "Design a distributed rate limiter using Redis",
-            "Identify where to place rate limiting in a system architecture",
+            "Explain why rate limiting protects APIs and backends",
+            "Explain token bucket vs leaky bucket and when to use each",
+            "Trace a request through gateway, limiter, and Redis-backed shared state",
+            "Respond to throttling with HTTP 429 and Retry-After",
         ],
         "prerequisites": ["Basic HTTP and REST APIs", "Key-value stores (Redis basics)", "Distributed systems fundamentals"],
         "misconceptions": [
@@ -503,182 +514,166 @@ _LESSON_PLANS: dict[str, dict] = {
         ],
         "sections": [
             {
-                "title": "Why Rate Limit?",
-                "objective": "Motivate rate limiting with a traffic-spike scenario",
+                "title": "Hook: When Traffic Spikes",
+                "objective": "Establish stakes: overload, fairness, and abuse — why every public API needs a limiter",
                 "scene_type": "veo_cinematic",
-                "duration_sec": 30,
-                "key_points": [
-                    "Prevent service overload",
-                    "Ensure fair client usage",
-                    "Protect against DDoS",
-                ],
+                "style_preset": "cinematic_minimal",
+                "render_mode": "auto",
+                "duration_sec": 28,
+                "transition_note": "Next we anchor the architecture before diving into algorithms.",
+                "continuity_anchor": CONTINUITY_MOTIF_RATE_LIMIT,
+                "teaching_note": "Open with emotion + stakes; Veo carries motion here.",
+                "key_points": ["Spike → queue → timeouts", "Fairness across tenants", "DDoS & abuse containment"],
                 "narration": (
-                    "Imagine your API is suddenly hit with ten times its normal traffic. "
-                    "Without rate limiting, your servers would buckle under the load, database connections would max out, "
-                    "and your entire service could go down. Rate limiting is the shield that protects your system. "
-                    "It controls how many requests a client can make in a given time window — ensuring fair usage "
-                    "and preventing both accidental overloads and malicious abuse. In this lesson, we'll explore "
-                    "the core algorithms behind rate limiting, how to implement them at scale, and where to place them "
-                    "in your architecture."
+                    "Picture a viral post: traffic spikes tenfold in minutes. Without a rate limiter, "
+                    "queues explode, threads block, and databases burn connection pools — one noisy neighbor can "
+                    "take down the whole service. Rate limiting is how you cap work per client, preserve "
+                    "headroom for everyone, and survive both flash crowds and malicious floods. "
+                    "In this lesson we build intuition first, then algorithms, then where to put them in production."
                 ),
-                "visual_strategy": "Cinematic: flood of request arrows overwhelming a server, then a shield appearing and filtering them",
+                "visual_strategy": (
+                    "Amber request particles stream toward a dark server stack; a teal gateway iris opens and "
+                    "filters the stream into an orderly queue; subtle pulse waves show load flattening"
+                ),
             },
             {
-                "title": "Token Bucket Algorithm",
-                "objective": "Explain token bucket mechanics with a visual simulation",
-                "scene_type": "deterministic_animation",
-                "duration_sec": 40,
-                "key_points": [
-                    "Tokens added at rate r/sec",
-                    "Max capacity: b tokens",
-                    "Request → consume 1 token",
-                    "Empty bucket → reject (429)",
-                    "Allows bursts up to b",
-                ],
-                "narration": (
-                    "The token bucket is the most widely used rate limiting algorithm, and understanding it is key to "
-                    "designing any rate limiter. Here's how it works: tokens are added to a bucket at a fixed rate — "
-                    "say, ten tokens per second. The bucket has a maximum capacity. When a request arrives, it must consume "
-                    "one token. If the bucket is empty, the request is rejected. The beauty of this design is that it "
-                    "naturally allows bursts. If no requests have arrived for a while, tokens accumulate up to the bucket "
-                    "capacity, allowing a short burst of traffic. This makes it ideal for APIs where occasional spikes are expected."
-                ),
-                "visual_strategy": "Animated bucket filling with tokens, requests arriving and consuming tokens, burst scenario",
-            },
-            {
-                "title": "Leaky Bucket Algorithm",
-                "objective": "Compare leaky bucket's constant-rate processing to token bucket",
-                "scene_type": "deterministic_animation",
-                "duration_sec": 35,
-                "key_points": [
-                    "Requests queue in bucket",
-                    "Drain at constant rate",
-                    "Overflow → drop excess",
-                    "Smooth output guaranteed",
-                ],
-                "narration": (
-                    "While the token bucket allows bursts, the leaky bucket takes the opposite approach — "
-                    "and this distinction is critical for choosing the right algorithm. Think of it as a bucket "
-                    "with a small hole at the bottom. Requests flow in at whatever rate they arrive, but they "
-                    "drain out — that is, get processed — at a constant, fixed rate. If requests arrive faster "
-                    "than the drain rate, the bucket fills up. Once full, excess requests simply overflow and "
-                    "are dropped. This guarantees a perfectly smooth output rate, making it ideal for scenarios "
-                    "where downstream services need a steady, predictable flow of traffic."
-                ),
-                "visual_strategy": "Water-bucket metaphor: requests enter as water drops, leak out at constant rate",
-            },
-            {
-                "title": "Sliding Window Counter",
-                "objective": "Show how sliding windows avoid the boundary problem of fixed windows",
-                "scene_type": "code_trace",
-                "duration_sec": 40,
-                "key_points": [
-                    "Fixed window → boundary spike",
-                    "weight = prev × (1-t) + curr",
-                    "Smooth counter transition",
-                    "Only 2 counters needed",
-                ],
-                "narration": (
-                    "Both bucket algorithms work well, but fixed time windows have a subtle problem: a burst of "
-                    "requests at the boundary between two windows can effectively double your intended limit. "
-                    "The sliding window counter solves this elegantly. Instead of resetting counters at window "
-                    "boundaries, it uses a weighted combination of the current window's count and the previous "
-                    "window's count. For example, if we're thirty percent into the current window, the effective "
-                    "count is seventy percent of the previous window plus one hundred percent of the current one. "
-                    "This smooths out the boundary spike while keeping memory usage low — just two counters "
-                    "instead of a full request log."
-                ),
-                "visual_strategy": "Timeline with two overlapping windows and weighted counters updating in real time",
-            },
-            {
-                "title": "Distributed Rate Limiting with Redis",
-                "objective": "Design a distributed rate limiter using Redis atomic operations",
+                "title": "Architecture: Where the Limiter Lives",
+                "objective": "Show client → API gateway → services → Redis for shared counters",
                 "scene_type": "system_design_graph",
-                "duration_sec": 45,
-                "key_points": [
-                    "Shared state via Redis",
-                    "INCR + EXPIRE commands",
-                    "Lua scripts for atomicity",
-                    "Single-threaded safety",
-                ],
+                "style_preset": "clean_academic",
+                "render_mode": "auto",
+                "duration_sec": 42,
+                "transition_note": "With that map in mind, we zoom into the token bucket.",
+                "continuity_anchor": CONTINUITY_MOTIF_RATE_LIMIT,
+                "teaching_note": "Single horizontal swimlane diagram; numbers on arrows.",
+                "key_points": ["Gateway: single choke point", "Per-route vs global limits", "Redis: shared truth"],
                 "narration": (
-                    "In production, you rarely have just one API server. When requests are spread across "
-                    "multiple servers, each needs to check against the same rate limit — and that requires "
-                    "shared state. Redis is the go-to solution here. Using the atomic INCR command paired "
-                    "with EXPIRE, you can implement a distributed counter in just two operations. For more "
-                    "precise sliding windows, Lua scripts running inside Redis ensure atomicity. The challenge "
-                    "is handling race conditions and clock differences across servers, but Redis's single-threaded "
-                    "execution model makes the counter operations inherently safe."
+                    "Before we touch math, we need a map. Clients hit your API gateway — the front door. "
+                    "That's the most common place to enforce rate limits: one policy before traffic fans out. "
+                    "Behind the gateway, microservices may add their own finer limits. When multiple "
+                    "instances need the same count, they share state in Redis: atomic increments, expiring keys, "
+                    "sometimes Lua for complex windows. Client-side rate limits can help courtesy, but the "
+                    "server must always enforce the real rule."
                 ),
-                "visual_strategy": "Architecture: multiple API servers connected to Redis cluster, showing command flow",
+                "visual_strategy": (
+                    "Left-to-right four panels: Client (mobile), API Gateway (teal badge RATE LIMIT), "
+                    "Service pods, Redis cylinder with INCR/EXPIRE arrow; numbered arrows 1–4"
+                ),
             },
             {
-                "title": "Where to Place the Rate Limiter",
-                "objective": "Discuss placement options: client, API gateway, middleware, service",
-                "scene_type": "system_design_graph",
-                "duration_sec": 30,
-                "key_points": [
-                    "API Gateway (centralized)",
-                    "Service Middleware (granular)",
-                    "Client-side (cooperative)",
-                    "Defense in depth (layers)",
-                ],
+                "title": "Token Bucket: Bursts You Can Afford",
+                "objective": "Explain refill rate, capacity, burst allowance, and rejection when empty",
+                "scene_type": "deterministic_animation",
+                "style_preset": "clean_academic",
+                "render_mode": "auto",
+                "duration_sec": 40,
+                "transition_note": "Contrast with leaky bucket next — smooth vs bursty.",
+                "continuity_anchor": CONTINUITY_MOTIF_RATE_LIMIT,
+                "teaching_note": "Same teal/amber palette as hook for visual continuity.",
+                "key_points": ["Refill r tokens/sec", "Capacity b", "Burst ≤ b", "Empty → reject"],
                 "narration": (
-                    "Now that we understand the algorithms, where exactly should we enforce rate limits? "
-                    "The most common choice is the API Gateway — it's the single entry point for all traffic, "
-                    "making it easy to apply limits centrally before requests fan out to microservices. "
-                    "For more granular control, you can add rate limiting as middleware within individual "
-                    "services. Some systems use both: a gateway-level limit for overall protection and "
-                    "service-level limits for per-endpoint control. Client-side rate limiting can help as a "
-                    "courtesy, but it should never be your only defense since it can be easily bypassed."
+                    "The token bucket is the workhorse of rate limiting. Tokens drip into a bucket at rate R, "
+                    "up to a maximum capacity B. Each request consumes one token. If tokens are available, "
+                    "you can burst — that's why APIs feel snappy under uneven traffic. If the bucket is empty, "
+                    "you reject or queue. This model maps cleanly to many product SLAs: sustained average rate "
+                    "with controlled bursts."
                 ),
-                "visual_strategy": "Layered architecture diagram with rate-limiter badges at each layer",
+                "visual_strategy": (
+                    "Cross-section bucket with teal tokens; curved arrow showing refill rate R; burst "
+                    "cluster of amber dots leaving; empty state with red X"
+                ),
             },
             {
-                "title": "Handling Throttled Requests",
-                "objective": "Explain HTTP 429, Retry-After headers, and backoff strategies",
+                "title": "Leaky Bucket: Smooth Output",
+                "objective": "Contrast constant drain vs token bucket; overflow when queue exceeds capacity",
+                "scene_type": "deterministic_animation",
+                "style_preset": "clean_academic",
+                "render_mode": "auto",
+                "duration_sec": 36,
+                "transition_note": "Now we follow one request through the full path.",
+                "continuity_anchor": CONTINUITY_MOTIF_RATE_LIMIT,
+                "teaching_note": "Side-by-side mini compare with token bucket silhouette in corner.",
+                "key_points": ["Drain at fixed rate", "Queue inside bucket", "Overflow dropped", "Smooth downstream"],
+                "narration": (
+                    "The leaky bucket shapes traffic differently. Requests enter a queue and drain to the "
+                    "backend at a fixed rate — like a narrow pipe. That smooths spikes and protects fragile "
+                    "downstreams. If the queue overflows, you drop. Choose token bucket when you want to allow "
+                    "bursts; choose leaky when you need perfectly steady egress to databases or payment partners."
+                ),
+                "visual_strategy": (
+                    "Vertical bucket with narrow leak at bottom; steady drip to downstream pipe; overflow spill "
+                    "labeled drop"
+                ),
+            },
+            {
+                "title": "Request Flow: End-to-End",
+                "objective": "Animate one HTTP request passing through limit check and Redis touch",
                 "scene_type": "generated_still_with_motion",
-                "duration_sec": 25,
-                "key_points": [
-                    "HTTP 429 Too Many Requests",
-                    "Retry-After: <seconds>",
-                    "Exponential backoff",
-                    "Hard vs. soft limits",
-                ],
+                "style_preset": "modern_technical",
+                "render_mode": "auto",
+                "duration_sec": 38,
+                "transition_note": "Finally, what the client sees when limited.",
+                "continuity_anchor": CONTINUITY_MOTIF_RATE_LIMIT,
+                "teaching_note": "High Veo score: motion shows packet flow.",
+                "key_points": ["GET /api/…", "Limiter checks counter", "Redis INCR", "Allow or 429"],
                 "narration": (
-                    "When a request exceeds the rate limit, your system needs to respond clearly and "
-                    "helpfully. The standard response is HTTP 429 Too Many Requests, which tells the client "
-                    "exactly what happened. Include a Retry-After header specifying how many seconds the client "
-                    "should wait before trying again. Well-behaved clients will implement exponential backoff — "
-                    "waiting longer after each rejection to avoid hammering the server. It's also important to "
-                    "distinguish between hard limits, which reject immediately, and soft limits, which may "
-                    "queue or delay requests instead of dropping them."
+                    "Follow a single request. It hits the gateway; the limiter extracts a key — maybe tenant ID "
+                    "plus route. It checks Redis: increment the counter, compare to threshold, set TTL on first "
+                    "hit. Allow passes through to the service; deny returns a structured error. "
+                    "That entire path is what your observability dashboards should trace."
                 ),
-                "visual_strategy": "HTTP request/response exchange with 429 status code and countdown timer",
+                "visual_strategy": (
+                    "Single glowing packet travels along curved path through gateway chip, Redis flash, "
+                    "to service; alternate branch shows 429 fork"
+                ),
+            },
+            {
+                "title": "Throttling: 429, Retry-After, Backoff",
+                "objective": "Teach HTTP 429, Retry-After header, and exponential backoff for clients",
+                "scene_type": "generated_still_with_motion",
+                "style_preset": "clean_academic",
+                "render_mode": "auto",
+                "duration_sec": 32,
+                "transition_note": "We close with a design checklist.",
+                "continuity_anchor": CONTINUITY_MOTIF_RATE_LIMIT,
+                "teaching_note": "Still image + optional short Veo on retry timer.",
+                "key_points": ["429 Too Many Requests", "Retry-After: seconds", "Backoff + jitter", "Hard vs soft limit"],
+                "narration": (
+                    "When you throttle, speak clearly. HTTP 429 tells the client they exceeded the limit. "
+                    "Pair it with Retry-After so SDKs and browsers know when to try again. Good clients "
+                    "implement exponential backoff with jitter — so a thundering herd doesn't retry in sync. "
+                    "Hard limits drop immediately; soft limits might queue or delay — pick based on UX."
+                ),
+                "visual_strategy": (
+                    "HTTP response card: status 429, headers Retry-After, timeline with exponential backoff steps"
+                ),
             },
             {
                 "title": "Recap & Design Checklist",
-                "objective": "Summarise all algorithms and provide a rate-limiter design checklist",
+                "objective": "Summarize algorithms, placement, Redis, and client-facing behavior",
                 "scene_type": "summary_scene",
-                "duration_sec": 25,
+                "style_preset": "clean_academic",
+                "render_mode": "force_static",
+                "duration_sec": 34,
+                "transition_note": "",
+                "continuity_anchor": CONTINUITY_MOTIF_RATE_LIMIT,
+                "teaching_note": "Quiz follows in the app.",
                 "key_points": [
-                    "Token bucket → allows bursts",
-                    "Leaky bucket → smooth rate",
-                    "Sliding window → precise limits",
-                    "Redis → distributed state",
-                    "API Gateway → central enforcement",
-                    "429 + Retry-After → clear response",
+                    "Pick bucket model for your traffic shape",
+                    "Gateway + Redis for distributed truth",
+                    "Sliding windows for precision (add-on)",
+                    "429 + Retry-After for clients",
                 ],
                 "narration": (
-                    "Let's bring everything together. When designing a rate limiter, start by choosing your "
-                    "algorithm: use token bucket if you need to allow bursts, leaky bucket for smooth constant-rate "
-                    "processing, or sliding window for precise time-based limiting. For distributed systems, "
-                    "Redis gives you the shared state you need with atomic operations. Place your rate limiter "
-                    "at the API gateway for simplicity, and add per-service limits for granularity. Always "
-                    "return clear HTTP 429 responses with Retry-After headers so clients know how to behave. "
-                    "With these pieces in place, your system is protected, fair, and resilient."
+                    "Here's your checklist. First, match the algorithm to your traffic: token bucket for bursts, "
+                    "leaky bucket for smooth output, sliding or fixed windows when you need hard time precision. "
+                    "Second, enforce at the gateway; add service limits where needed; share counters in Redis. "
+                    "Third, always return actionable errors: 429 with Retry-After. "
+                    "Do that, and your API stays fair, fast, and resilient."
                 ),
-                "visual_strategy": "Checklist with check marks, ending with miniature architecture diagram",
+                "visual_strategy": (
+                    "3-column checklist: Algorithms | Placement | Client UX; small architecture thumbnail in footer"
+                ),
             },
         ],
     },
@@ -689,81 +684,48 @@ _LESSON_PLANS: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 
 
-_VEO_MOTION_KEYWORDS = {
-    "flow", "movement", "moving", "animate", "cycle", "travel", "packet",
-    "request", "arrow", "slide", "transition", "formation", "sequence",
-    "filling", "draining", "growing", "spreading", "cascading",
-}
-
-VEO_MAX_DURATION = 5.0
-
-
-def _score_veo_eligibility(section: dict, scene_type: str, scene_index: int) -> float:
-    """Score how much a scene benefits from motion (0.0–1.0)."""
-    score = 0.0
-
-    type_scores = {
-        "veo_cinematic": 0.8,
-        "generated_still_with_motion": 0.5,
-        "system_design_graph": 0.3,
-        "deterministic_animation": 0.2,
-        "code_trace": 0.1,
-        "summary_scene": 0.0,
-    }
-    score += type_scores.get(scene_type, 0.1)
-
-    # Intro scenes benefit more from cinematic motion
-    if scene_index == 0:
-        score += 0.15
-
-    vs = section.get("visual_strategy", "").lower()
-    keyword_hits = sum(1 for kw in _VEO_MOTION_KEYWORDS if kw in vs)
-    score += min(0.2, keyword_hits * 0.05)
-
-    return min(1.0, round(score, 2))
-
-
-def _build_veo_prompt(section: dict, lesson_title: str) -> str:
-    """Build a focused 5-second motion prompt from scene data."""
-    title = section.get("title", "")
-    vs = section.get("visual_strategy", "")
-    obj = section.get("objective", "")
-
-    prompt = (
-        f"Educational animation, 5 seconds, clean white background, "
-        f"technical diagram style. Topic: {lesson_title} — {title}. "
-    )
-
-    if vs:
-        prompt += f"Visual: {vs}. "
-    elif obj:
-        prompt += f"Concept: {obj}. "
-
-    prompt += (
-        "Smooth motion, no text overlays, no human faces. "
-        "Professional educational video style, 1920x1080, 24fps."
-    )
-    return prompt
-
-
 def _build_scenes_for_plan(plan: dict, domain: str) -> list[dict]:
     """Build full SceneSpec dicts from a lesson-plan's sections."""
+    sections = plan.get("sections", [])
+    total = len(sections)
     scenes: list[dict] = []
     lesson_title = plan.get("lesson_title", domain)
-    for idx, section in enumerate(plan.get("sections", [])):
+    style_preset = plan.get("style_preset", "clean_academic")
+
+    render_strategy_map = {
+        "deterministic_animation": "remotion",
+        "generated_still_with_motion": "image_to_video",
+        "veo_cinematic": "veo",
+        "code_trace": "remotion",
+        "system_design_graph": "remotion",
+        "summary_scene": "remotion",
+    }
+    mood_map = {
+        "deterministic_animation": "focused",
+        "code_trace": "focused",
+        "system_design_graph": "neutral",
+        "veo_cinematic": "dramatic",
+        "generated_still_with_motion": "curious",
+        "summary_scene": "uplifting",
+    }
+
+    prev_title = ""
+    for idx, section in enumerate(sections):
         scene_type = section.get("scene_type", "deterministic_animation")
-
-        render_strategy_map = {
-            "deterministic_animation": "remotion",
-            "generated_still_with_motion": "image_to_video",
-            "veo_cinematic": "veo",
-            "code_trace": "remotion",
-            "system_design_graph": "remotion",
-            "summary_scene": "remotion",
-        }
         render_strategy = render_strategy_map.get(scene_type, "default")
+        render_mode = section.get("render_mode", "auto")
 
-        narration = section.get("narration") or _narration_for_section(section, lesson_title, idx)
+        base_narration = section.get("narration") or _narration_for_section(
+            section, lesson_title, idx
+        )
+        bridge = ""
+        if idx > 0 and prev_title:
+            bridge = (
+                f"Building on what we saw in {prev_title}, "
+            )
+        narration = f"{bridge}{base_narration}".strip()
+        if section.get("transition_note"):
+            narration = f"{narration} {section['transition_note']}".strip()
 
         visual_elements = [
             {"type": "title_text", "description": section["title"], "position": "top-center", "style": "bold-32"},
@@ -773,41 +735,88 @@ def _build_scenes_for_plan(plan: dict, domain: str) -> list[dict]:
                 {"type": "bullet_point", "description": kp, "position": "center-left", "style": "regular-24"}
             )
 
-        animation_beats = []
         duration = section.get("duration_sec", 30)
         beat_count = max(2, int(duration // 10))
+        animation_beats = []
         for b in range(beat_count):
             t = round(b * (duration / beat_count), 1)
             if b == 0:
-                animation_beats.append({"timestamp_sec": t, "action": "fade_in", "description": f"Introduce {section['title']}"})
+                animation_beats.append(
+                    {"timestamp_sec": t, "action": "fade_in", "description": f"Introduce {section['title']}"}
+                )
             elif b == beat_count - 1:
-                animation_beats.append({"timestamp_sec": t, "action": "fade_out", "description": "Transition to next scene"})
+                animation_beats.append(
+                    {"timestamp_sec": t, "action": "fade_out", "description": "Handoff to next scene"}
+                )
             else:
-                animation_beats.append({"timestamp_sec": t, "action": "reveal", "description": f"Reveal key point {b}"})
+                animation_beats.append(
+                    {"timestamp_sec": t, "action": "reveal", "description": f"Reveal key point {b}"}
+                )
 
-        # Veo eligibility scoring
-        veo_score = _score_veo_eligibility(section, scene_type, idx)
-        veo_eligible = veo_score >= 0.5
-        veo_prompt = _build_veo_prompt(section, lesson_title) if veo_eligible else None
+        continuity_anchor = section.get("continuity_anchor") or (
+            CONTINUITY_MOTIF_RATE_LIMIT
+            if "rate" in lesson_title.lower() or "limit" in lesson_title.lower()
+            else VISUAL_IDENTITY_TOKEN[:80]
+        )
 
-        asset_requests = []
-        if scene_type in ("generated_still_with_motion", "veo_cinematic"):
-            asset_requests.append({"type": "image", "prompt": section.get("visual_strategy", ""), "provider": "image"})
-        if veo_eligible:
-            asset_requests.append({
-                "type": "video",
-                "prompt": veo_prompt,
-                "provider": "video",
-                "max_duration_sec": VEO_MAX_DURATION,
-            })
+        veo_score = score_veo_eligibility(
+            scene_type=scene_type,
+            scene_index=idx,
+            total_scenes=total,
+            visual_strategy=section.get("visual_strategy", ""),
+            title=section.get("title", ""),
+            render_mode=render_mode,
+        )
+        veo_eligible = veo_score >= 0.42 and render_mode != "force_static"
+        if render_mode == "force_veo":
+            veo_eligible = True
+        ve_dur = pick_veo_duration_sec(veo_score) if veo_eligible else None
+        veo_prompt = (
+            build_veo_prompt(
+                lesson_title=lesson_title,
+                scene_title=section.get("title", ""),
+                visual_strategy=section.get("visual_strategy", ""),
+                objective=section.get("objective", ""),
+                continuity_anchor=continuity_anchor,
+            )
+            if veo_eligible
+            else None
+        )
 
-        mood_map = {
-            "deterministic_animation": "focused",
-            "code_trace": "focused",
-            "system_design_graph": "neutral",
-            "veo_cinematic": "dramatic",
-            "generated_still_with_motion": "curious",
-            "summary_scene": "uplifting",
+        image_prompt = build_nano_banana_prompt(
+            lesson_title=lesson_title,
+            scene_title=section["title"],
+            learning_objective=section.get("objective", ""),
+            key_visual_idea=section.get("visual_strategy", section.get("objective", "")),
+            style_preset=section.get("style_preset", style_preset),
+            scene_type=scene_type,
+            scene_index=idx,
+            total_scenes=total,
+            continuity_anchor=continuity_anchor,
+            on_screen_bullets=section.get("key_points"),
+        )
+
+        asset_requests: list[dict] = [
+            {"type": "image", "prompt": image_prompt, "provider": "image"},
+        ]
+        fallback_plan = section.get(
+            "fallback_plan",
+            "If motion fails: hold last Nano Banana frame with subtle Ken Burns zoom; keep narration.",
+        )
+        if veo_eligible and veo_prompt:
+            asset_requests.append(
+                {
+                    "type": "video",
+                    "prompt": veo_prompt,
+                    "provider": "video",
+                    "max_duration_sec": min(VEO_DURATION_MAX, max(3.0, ve_dur or 4.0)),
+                }
+            )
+
+        transition_meta = {
+            "transition_style": section.get("transition_style", "crossfade"),
+            "transition_note": section.get("transition_note", ""),
+            "continuity_anchor": continuity_anchor,
         }
 
         scenes.append({
@@ -818,7 +827,9 @@ def _build_scenes_for_plan(plan: dict, domain: str) -> list[dict]:
             "teaching_note": section.get("teaching_note", ""),
             "source_refs": [],
             "scene_type": scene_type,
+            "style_preset": section.get("style_preset", style_preset),
             "render_strategy": render_strategy,
+            "render_mode": render_mode,
             "duration_sec": duration,
             "narration_text": narration,
             "on_screen_text": section.get("key_points", []),
@@ -828,10 +839,16 @@ def _build_scenes_for_plan(plan: dict, domain: str) -> list[dict]:
             "veo_eligible": veo_eligible,
             "veo_score": veo_score,
             "veo_prompt": veo_prompt,
-            "image_prompt": section.get("visual_strategy", "") if scene_type in ("generated_still_with_motion", "veo_cinematic") else None,
+            "image_prompt": image_prompt,
+            "continuity_anchor": continuity_anchor,
+            "transition_note": section.get("transition_note", ""),
+            "fallback_plan": fallback_plan,
+            "transition_metadata": transition_meta,
             "music_mood": mood_map.get(scene_type, "neutral"),
             "validation_notes": "",
         })
+        prev_title = section.get("title", "")
+
     return scenes
 
 

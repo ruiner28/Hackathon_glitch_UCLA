@@ -1,3 +1,5 @@
+import mimetypes
+import os
 from pathlib import Path
 from uuid import UUID
 
@@ -13,6 +15,7 @@ from app.models.lesson import Lesson, LessonDomain, LessonStatus, LessonStylePre
 from app.models.lesson_plan import LessonPlan
 from app.models.render_job import RenderJob, RenderJobStatus
 from app.models.scene import Scene
+from app.models.scene_asset import AssetStatus, AssetType, SceneAsset
 from app.models.source_document import SourceDocument
 from app.schemas.requests import LessonCreate, LessonStyleUpdate, SceneReorder, SceneUpdate
 from app.schemas.responses import (
@@ -30,6 +33,12 @@ from app.schemas.responses import (
 from app.services.pipeline import LessonPipeline
 
 router = APIRouter()
+
+
+def _scene_response(scene: Scene) -> SceneResponse:
+    return SceneResponse.model_validate(scene).model_copy(
+        update={"preview_image_url": f"/api/scenes/{scene.id}/thumbnail"}
+    )
 
 
 async def _get_lesson_or_404(lesson_id: UUID, db: AsyncSession) -> Lesson:
@@ -77,7 +86,9 @@ async def create_lesson(body: LessonCreate, db: AsyncSession = Depends(get_db)):
 @router.get("/lessons/{lesson_id}", response_model=LessonDetailResponse)
 async def get_lesson(lesson_id: UUID, db: AsyncSession = Depends(get_db)):
     lesson = await _get_lesson_or_404(lesson_id, db)
-    return LessonDetailResponse.model_validate(lesson)
+    base = LessonDetailResponse.model_validate(lesson)
+    ordered = sorted(lesson.scenes, key=lambda s: s.scene_order)
+    return base.model_copy(update={"scenes": [_scene_response(s) for s in ordered]})
 
 
 @router.post("/lessons/{lesson_id}/extract", response_model=LessonResponse)
@@ -101,7 +112,7 @@ async def compile_scenes(lesson_id: UUID, db: AsyncSession = Depends(get_db)):
     lesson = await _get_lesson_or_404(lesson_id, db)
     pipeline = LessonPipeline(db)
     scenes = await pipeline.compile_scenes(lesson_id)
-    return [SceneResponse.model_validate(s) for s in scenes]
+    return [_scene_response(s) for s in scenes]
 
 
 @router.post("/lessons/{lesson_id}/generate-assets", response_model=LessonResponse)
@@ -135,7 +146,7 @@ async def get_scenes(lesson_id: UUID, db: AsyncSession = Depends(get_db)):
         select(Scene).where(Scene.lesson_id == lesson_id).order_by(Scene.scene_order)
     )
     scenes = result.scalars().all()
-    return [SceneResponse.model_validate(s) for s in scenes]
+    return [_scene_response(s) for s in scenes]
 
 
 @router.patch("/scenes/{scene_id}", response_model=SceneResponse)
@@ -151,16 +162,48 @@ async def update_scene(scene_id: UUID, body: SceneUpdate, db: AsyncSession = Dep
         scene.on_screen_text_json = body.on_screen_text
     if body.duration_sec is not None:
         scene.duration_sec = body.duration_sec
+    spec = dict(scene.scene_spec_json or {})
+    spec_updated = False
     if body.veo_eligible is not None:
-        spec = dict(scene.scene_spec_json or {})
         spec["veo_eligible"] = body.veo_eligible
         if not body.veo_eligible:
             spec["veo_score"] = 0.0
+        spec_updated = True
+    if body.render_mode is not None:
+        spec["render_mode"] = body.render_mode
+        if body.render_mode == "force_veo":
+            spec["veo_eligible"] = True
+        elif body.render_mode == "force_static":
+            spec["veo_eligible"] = False
+            spec["veo_score"] = 0.0
+        spec_updated = True
+    if spec_updated:
         scene.scene_spec_json = spec
 
     await db.flush()
     await db.refresh(scene)
-    return SceneResponse.model_validate(scene)
+    return _scene_response(scene)
+
+
+@router.get("/scenes/{scene_id}/thumbnail")
+async def get_scene_thumbnail(scene_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Serve the latest ready image asset for editor thumbnails (local file storage)."""
+    result = await db.execute(
+        select(SceneAsset)
+        .where(SceneAsset.scene_id == scene_id)
+        .where(SceneAsset.asset_type == AssetType.image)
+        .where(SceneAsset.status == AssetStatus.ready)
+        .order_by(SceneAsset.created_at.desc())
+    )
+    asset = result.scalars().first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="No image asset for this scene.")
+    url = asset.storage_url or ""
+    path = url[7:] if url.startswith("file://") else url
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Image file not found.")
+    media_type, _ = mimetypes.guess_type(path)
+    return FileResponse(path, media_type=media_type or "image/png")
 
 
 @router.post("/scenes/{scene_id}/regenerate", response_model=SceneResponse)
@@ -175,7 +218,7 @@ async def regenerate_scene(scene_id: UUID, db: AsyncSession = Depends(get_db)):
     await db.flush()
     await db.refresh(scene)
 
-    return SceneResponse.model_validate(scene)
+    return _scene_response(scene)
 
 
 @router.post("/scenes/{scene_id}/regenerate-assets", response_model=SceneResponse)
@@ -189,7 +232,7 @@ async def regenerate_scene_assets(scene_id: UUID, db: AsyncSession = Depends(get
     pipeline = LessonPipeline(db)
     await pipeline.regenerate_single_scene_assets(scene)
     await db.refresh(scene)
-    return SceneResponse.model_validate(scene)
+    return _scene_response(scene)
 
 
 @router.post("/lessons/{lesson_id}/reorder-scenes", response_model=list[SceneResponse])
@@ -211,7 +254,7 @@ async def reorder_scenes(
     ordered = sorted(scenes_map.values(), key=lambda s: s.scene_order)
     for s in ordered:
         await db.refresh(s)
-    return [SceneResponse.model_validate(s) for s in ordered]
+    return [_scene_response(s) for s in ordered]
 
 
 @router.patch("/lessons/{lesson_id}/style", response_model=LessonResponse)

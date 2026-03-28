@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/visualcs"
     STORAGE_BACKEND: str = "local"
     LOCAL_STORAGE_PATH: str = "./storage"
+    DEMO_CACHE_PATH: str = "./storage/demo_cache"
 
     LLM_PROVIDER: str = "mock"
     IMAGE_PROVIDER: str = "mock"

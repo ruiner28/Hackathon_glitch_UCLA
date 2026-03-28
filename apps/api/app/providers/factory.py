@@ -54,9 +54,9 @@ def get_tts_provider() -> TTSProvider:
         from app.providers.local_tts import LocalTTSProvider
 
         return LocalTTSProvider()
-    from app.providers.google_tts import GoogleTTSProvider
+    from app.providers.google_tts import GeminiTTSProvider
 
-    return GoogleTTSProvider()
+    return GeminiTTSProvider()
 
 
 def get_music_provider() -> MusicProvider:

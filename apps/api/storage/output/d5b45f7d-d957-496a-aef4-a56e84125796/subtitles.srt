@@ -1,0 +1,107 @@
+1
+00:00:03,000 --> 00:00:10,900
+Rate limiters serve diverse purposes. They safeguard APIs from being overwhelmed or exploited, block relentless
+
+2
+00:00:11,000 --> 00:00:18,899
+brute-force attacks on login endpoints, and prevent spam submissions. Furthermore, they are vital for monetizing
+
+3
+00:00:19,000 --> 00:00:26,899
+services, enabling platforms to offer tiered access based on defined usage limits.
+
+4
+00:00:28,500 --> 00:00:35,399
+Imagine a popular online service receiving millions of requests every second. Without control, this flood can overwhelm
+
+5
+00:00:35,500 --> 00:00:42,399
+servers, leading to crashes and service outages. This is where rate limiters become crucial. They act as traffic cops,
+
+6
+00:00:42,500 --> 00:00:49,399
+regulating the flow of requests to protect your systems, ensure fair resource allocation, and maintain a smooth user
+
+7
+00:00:49,500 --> 00:00:56,399
+experience.
+
+8
+00:00:58,000 --> 00:01:05,650
+The Fixed Window Counter is one of the simplest algorithms. It defines distinct time intervals, like a one-minute
+
+9
+00:01:05,750 --> 00:01:13,400
+window, and simply counts requests within it. When a new window starts, the counter resets. However, this simplicity has
+
+10
+00:01:13,500 --> 00:01:21,150
+a critical flaw: a client can send a burst of requests right at the end of one window and another burst at the beginning
+
+11
+00:01:21,250 --> 00:01:28,900
+of the next, effectively sending double the allowed rate within a short timeframe.
+
+12
+00:01:30,500 --> 00:01:37,400
+For greater precision, the Sliding Window Log algorithm stores a timestamp for every request made by a client. When a
+
+13
+00:01:37,500 --> 00:01:44,400
+new request arrives, the system counts all timestamps that fall within the current sliding time window. While this
+
+14
+00:01:44,500 --> 00:01:51,400
+method offers highly accurate rate limiting, effectively eliminating the burst issue, it can become memory-intensive as
+
+15
+00:01:51,500 --> 00:01:58,400
+the number of stored timestamps grows, especially for very active clients.
+
+16
+00:02:00,000 --> 00:02:06,900
+The Token Bucket algorithm is excellent for handling occasional bursts of traffic. Imagine a bucket that's constantly
+
+17
+00:02:07,000 --> 00:02:13,900
+being filled with tokens at a steady rate, but it has a maximum capacity. Each incoming request needs one token to
+
+18
+00:02:14,000 --> 00:02:20,900
+proceed. If there are tokens available, the request is served immediately. If the bucket is empty, the request is
+
+19
+00:02:21,000 --> 00:02:27,900
+rejected. This mechanism allows for short bursts up to the bucket's capacity while smoothing the overall request rate.
+
+20
+00:02:29,500 --> 00:02:35,400
+In a distributed system, a rate limiter cannot simply run on a single server; its state must be shared across all
+
+21
+00:02:35,500 --> 00:02:41,400
+instances. This usually involves a centralized data store like Redis or Memcached to maintain consistent counts.
+
+22
+00:02:41,500 --> 00:02:47,400
+Identifying clients reliably, whether by IP address, user ID, or API key, is paramount. These distributed setups
+
+23
+00:02:47,500 --> 00:02:53,400
+introduce complexities around data consistency, network latency, and clock synchronization across different machines.
+
+24
+00:02:55,000 --> 00:02:59,150
+Effective rate limiting isn't just about blocking requests; it's also about clear communication. Standard HTTP headers,
+
+25
+00:02:59,250 --> 00:03:03,400
+like 'X-RateLimit-Limit' and 'X-RateLimit-Remaining', inform clients of their current status. When limits are exceeded,
+
+26
+00:03:03,500 --> 00:03:07,650
+a '429 Too Many Requests' status code is returned. It's crucial to distinguish rate limiting, which rejects excess
+
+27
+00:03:07,750 --> 00:03:11,900
+requests, from throttling, which delays them, often to smooth out traffic rather than strictly enforce a hard cap.

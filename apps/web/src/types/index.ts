@@ -27,6 +27,8 @@ export interface LessonDetail extends Lesson {
   scenes: Scene[];
 }
 
+export type SceneRenderMode = "auto" | "force_static" | "force_veo";
+
 export interface Scene {
   id: string;
   lesson_id: string;
@@ -42,6 +44,8 @@ export interface Scene {
   status: string;
   created_at: string;
   updated_at: string;
+  /** API path e.g. /api/scenes/{id}/thumbnail — prefix with API base for <img src>. */
+  preview_image_url?: string | null;
 }
 
 export interface SceneAsset {

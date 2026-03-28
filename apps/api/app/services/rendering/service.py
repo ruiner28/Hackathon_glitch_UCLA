@@ -866,8 +866,10 @@ def _render_intro_card(lesson_title: str, scene_count: int,
 
 
 def _render_transition_card(next_title: str, next_index: int,
-                            total_scenes: int, style_name: str) -> Image.Image:
-    """Render a brief scene transition card."""
+                            total_scenes: int, style_name: str,
+                            transition_note: str = "",
+                            continuity_hint: str = "") -> Image.Image:
+    """Render a brief scene transition card (coherence bridge)."""
     colors = STYLE_PRESETS.get(style_name, STYLE_PRESETS["clean_academic"])
     img = Image.new("RGB", (WIDTH, HEIGHT), colors["bg"])
     _draw_gradient_bg(img, colors)
@@ -875,6 +877,7 @@ def _render_transition_card(next_title: str, next_index: int,
 
     font_label = _get_font(16, bold=True)
     font_title = _get_font(32, bold=True)
+    font_small = _get_font(18)
 
     # Center "UP NEXT" label
     label = f"SECTION {next_index + 1} OF {total_scenes}"
@@ -890,6 +893,22 @@ def _render_transition_card(next_title: str, next_index: int,
         tw = bb[2] - bb[0]
         draw.text(((WIDTH - tw) // 2, ty), line, fill=colors["fg"], font=font_title)
         ty += 42
+
+    if transition_note:
+        note_lines = _wrap_text(transition_note, font_small, WIDTH - 240)
+        ny = min(ty + 24, HEIGHT // 2 + 70)
+        for line in note_lines[:2]:
+            bb = font_small.getbbox(line)
+            tw = bb[2] - bb[0]
+            draw.text(((WIDTH - tw) // 2, ny), line, fill=colors["muted"], font=font_small)
+            ny += 26
+    if continuity_hint and not transition_note:
+        ch = _wrap_text(continuity_hint[:120], font_small, WIDTH - 240)
+        ny = HEIGHT // 2 + 70
+        for line in ch[:1]:
+            bb = font_small.getbbox(line)
+            tw = bb[2] - bb[0]
+            draw.text(((WIDTH - tw) // 2, ny), line, fill=colors["secondary"], font=font_small)
 
     # Progress bar
     bar_y = HEIGHT // 2 + 80
@@ -1137,7 +1156,7 @@ def _compose_video_ffmpeg(
                 silence_path = os.path.join(tmpdir, f"silence_{i:03d}.wav")
                 cmd_silence = [
                     "ffmpeg", "-y",
-                    "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono",
+                    "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
                     "-t", str(dur),
                     "-c:a", "pcm_s16le",
                     silence_path,
@@ -1162,7 +1181,7 @@ def _compose_video_ffmpeg(
             cmd_audio = [
                 "ffmpeg", "-y",
                 "-f", "concat", "-safe", "0", "-i", audio_list,
-                "-c:a", "pcm_s16le", "-ar", "22050", "-ac", "1",
+                "-c:a", "pcm_s16le", "-ar", "24000", "-ac", "1",
                 combined_audio,
             ]
             subprocess.run(cmd_audio, capture_output=True, text=True, timeout=60)
@@ -1334,7 +1353,13 @@ class RenderingService:
                 # Transition card before each scene (except first)
                 if i > 0:
                     trans_img = _render_transition_card(
-                        spec.get("title", f"Scene {i+1}"), i, len(scenes), style)
+                        spec.get("title", f"Scene {i+1}"),
+                        i,
+                        len(scenes),
+                        style,
+                        transition_note=str(spec.get("transition_note", "") or ""),
+                        continuity_hint=str(spec.get("continuity_anchor", "") or ""),
+                    )
                     trans_path = os.path.join(tmpdir, f"trans_{i:03d}.png")
                     trans_img.save(trans_path, "PNG")
                     all_image_paths.append(trans_path)

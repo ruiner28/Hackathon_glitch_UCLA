@@ -61,10 +61,12 @@ class CompilationService:
             "teaching_note": raw.get("teaching_note", ""),
             "source_refs": raw.get("source_refs", []),
             "scene_type": scene_type,
+            "style_preset": raw.get("style_preset", ""),
             "render_strategy": raw.get(
                 "render_strategy",
                 RENDER_STRATEGY_MAP.get(scene_type, "default"),
             ),
+            "render_mode": raw.get("render_mode", "auto"),
             "duration_sec": raw.get("duration_sec", 30),
             "narration_text": raw.get("narration_text", ""),
             "on_screen_text": raw.get("on_screen_text", []),
@@ -75,6 +77,10 @@ class CompilationService:
             "veo_score": raw.get("veo_score", 0.0),
             "veo_prompt": raw.get("veo_prompt"),
             "image_prompt": raw.get("image_prompt"),
+            "continuity_anchor": raw.get("continuity_anchor", ""),
+            "transition_note": raw.get("transition_note", ""),
+            "fallback_plan": raw.get("fallback_plan", ""),
+            "transition_metadata": raw.get("transition_metadata", {}),
             "music_mood": raw.get(
                 "music_mood",
                 MUSIC_MOOD_MAP.get(scene_type, "neutral"),
