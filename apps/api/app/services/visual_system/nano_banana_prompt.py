@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.visual_system.style_presets import VISUAL_IDENTITY_TOKEN, spec_for_preset
+from app.services.visual_system.topic_diagram_prompts import extra_constraints_for_topic
 
 
 def build_nano_banana_prompt(
@@ -39,6 +40,13 @@ def build_nano_banana_prompt(
     if continuity_anchor:
         anchor = f"Continuity: echo this motif — {continuity_anchor}. "
 
+    topic_extra = extra_constraints_for_topic(
+        lesson_title=lesson_title,
+        scene_title=scene_title,
+        scene_type=scene_type,
+    )
+    merged_constraints = " ".join(x for x in (extra_constraints, topic_extra) if x)
+
     parts = [
         f"16:9 educational infographic, NOT a photograph of people.",
         VISUAL_IDENTITY_TOKEN,
@@ -52,7 +60,7 @@ def build_nano_banana_prompt(
         "Use clear arrows with arrowheads; group related items in rounded panels; leave 12% margin as breathing room.",
         "Emphasis: one focal region 15–20% brighter or thicker stroke than the rest.",
         "No watermarks, no stock photos, no blurry text.",
-        extra_constraints or "",
+        merged_constraints,
     ]
     return " ".join(p for p in parts if p).strip()
 
@@ -75,6 +83,13 @@ def enrich_image_prompt_from_scene_spec(
     style = scene_spec.get("style_preset") or lesson_style
     st = scene_spec.get("scene_type", "deterministic_animation")
     if existing and len(existing) > 120:
+        topic = extra_constraints_for_topic(
+            lesson_title=lesson_title,
+            scene_title=scene_spec.get("title", "Scene"),
+            scene_type=st,
+        )
+        if topic:
+            return f"{VISUAL_IDENTITY_TOKEN} {topic} {existing}"
         return f"{VISUAL_IDENTITY_TOKEN} {existing}"
 
     bullets = scene_spec.get("on_screen_text") or []
