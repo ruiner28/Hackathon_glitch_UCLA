@@ -39,9 +39,13 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("GEMINI_API_KEY", "Gemini_Api_Key"),
     )
     GEMINI_MODEL: str = "gemini-2.0-flash"
+    # Veo text-to-video model id (Gemini API). Override if Google ships newer IDs.
+    VEO_MODEL: str = "veo-2.0-generate-001"
 
     GCS_BUCKET_NAME: str = ""
     GOOGLE_PROJECT_ID: str = ""
+    # Vertex AI (Lyria music). Region for aiplatform.googleapis.com predict endpoints.
+    GOOGLE_CLOUD_LOCATION: str = "us-central1"
 
     APP_ENV: str = "development"
     APP_SECRET_KEY: str = "change-me-in-production"

@@ -1,4 +1,4 @@
-"""Image provider using Nano Banana (gemini-2.5-flash-preview-image-generation) via google-genai SDK."""
+"""Image provider using Imagen 4 via google-genai SDK for high-quality diagram generation."""
 
 import base64
 import logging
@@ -8,15 +8,14 @@ from google.genai import types
 
 from app.core.config import get_settings
 from app.providers.base import ImageProvider
-from app.services.visual_system.nano_banana_prompt import enrich_image_prompt_from_scene_spec
 
 logger = logging.getLogger(__name__)
 
-IMAGE_MODEL = "gemini-2.5-flash-image"
+IMAGE_MODEL = "imagen-4.0-generate-001"
 
 
 class NanoBananaImageProvider(ImageProvider):
-    """Generates images using Nano Banana image generation."""
+    """Generates images using Imagen 4 (Nano Banana Pro)."""
 
     def __init__(self) -> None:
         settings = get_settings()
@@ -34,38 +33,60 @@ class NanoBananaImageProvider(ImageProvider):
             f"readable typography, no blurry text, no watermarks, no photorealistic faces."
         )
 
-        logger.info("NanoBanana: generating image, prompt=%s", prompt[:100])
+        logger.info("Imagen4: generating image, prompt=%s", prompt[:100])
 
         try:
-            response = self.client.models.generate_content(
+            response = self.client.models.generate_images(
                 model=IMAGE_MODEL,
-                contents=enhanced_prompt,
-                config=types.GenerateContentConfig(
-                    response_modalities=["IMAGE", "TEXT"],
+                prompt=enhanced_prompt,
+                config=types.GenerateImagesConfig(
+                    number_of_images=1,
                 ),
             )
 
-            if not response.candidates:
-                logger.warning("NanoBanana: empty candidates list")
-                return self._fallback_image()
+            if response.generated_images and len(response.generated_images) > 0:
+                image = response.generated_images[0].image
+                image_bytes = image.image_bytes
+                if isinstance(image_bytes, str):
+                    image_bytes = base64.b64decode(image_bytes)
+                logger.info(
+                    "Imagen4: generated image (%.1f KB)",
+                    len(image_bytes) / 1024,
+                )
+                return image_bytes
 
-            for part in response.candidates[0].content.parts:
-                if part.inline_data and part.inline_data.mime_type and part.inline_data.mime_type.startswith("image/"):
-                    image_bytes = part.inline_data.data
-                    if isinstance(image_bytes, str):
-                        image_bytes = base64.b64decode(image_bytes)
-                    logger.info(
-                        "NanoBanana: generated image (%.1f KB)",
-                        len(image_bytes) / 1024,
-                    )
-                    return image_bytes
-
-            logger.warning("NanoBanana: no image in response parts, falling back to placeholder")
-            return self._fallback_image()
+            logger.warning("Imagen4: no images in response, trying Gemini native fallback")
+            return await self._gemini_native_fallback(enhanced_prompt)
 
         except Exception as e:
-            logger.error("NanoBanana: generation failed: %s", e)
+            logger.error("Imagen4: generation failed: %s, trying Gemini native fallback", e)
+            try:
+                return await self._gemini_native_fallback(enhanced_prompt)
+            except Exception as e2:
+                logger.error("Gemini native fallback also failed: %s", e2)
+                return self._fallback_image()
+
+    async def _gemini_native_fallback(self, prompt: str) -> bytes:
+        """Fall back to Gemini native image generation if Imagen 4 fails."""
+        response = self.client.models.generate_content(
+            model="gemini-2.5-flash-preview-image-generation",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_modalities=["IMAGE", "TEXT"],
+            ),
+        )
+
+        if not response.candidates:
             return self._fallback_image()
+
+        for part in response.candidates[0].content.parts:
+            if part.inline_data and part.inline_data.mime_type and part.inline_data.mime_type.startswith("image/"):
+                image_bytes = part.inline_data.data
+                if isinstance(image_bytes, str):
+                    image_bytes = base64.b64decode(image_bytes)
+                return image_bytes
+
+        return self._fallback_image()
 
     async def generate_keyframe(self, scene_spec: dict) -> bytes:
         title = scene_spec.get("title", "")

@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,6 +40,7 @@ from app.services.music.service import MusicService
 from app.services.narration.service import NarrationService
 from app.services.planning.service import PlanningService
 from app.services.rendering.service import RenderingService
+from app.services.veo_render.service import VeoRenderService
 from app.services.visual_system.nano_banana_prompt import enrich_image_prompt_from_scene_spec
 
 logger = logging.getLogger(__name__)
@@ -402,9 +405,10 @@ class LessonPipeline:
     ) -> None:
         """Generate SVG-to-PNG images + TTS narration for diagram walkthrough scenes.
 
-        Optionally generates one hero image (Gemini) for the first scene and
-        one short Veo clip (3-5s) for a dynamic scene if the providers are
-        available and the scene qualifies.
+        Parallelisation strategy:
+        1. TTS narrations run concurrently (via NarrationService).
+        2. SVG→PNG rendering runs concurrently in a thread-pool.
+        3. Hero image + Veo clip fire in parallel once eligible scenes are identified.
         """
         from app.services.diagram.renderer import render_svg_for_state, svg_to_png
 
@@ -416,16 +420,35 @@ class LessonPipeline:
             raise ValueError("Diagram spec missing on LessonPlan")
 
         diagram_spec = plan.diagram_spec_json
-
         scene_specs = [s.scene_spec_json or {} for s in scenes]
-        narrations = await self.narration.generate_all_narrations(
+
+        # ── Phase 1: TTS narrations + SVG→PNG renders in parallel ──
+        narrations_task = self.narration.generate_all_narrations(
             scene_specs, str(lesson.id),
         )
 
-        hero_generated = False
-        veo_generated = False
+        loop = asyncio.get_running_loop()
+        pool = ThreadPoolExecutor(max_workers=min(4, len(scenes)))
 
-        for idx, (scene, narration_result) in enumerate(zip(scenes, narrations)):
+        async def _render_svg_png(spec: dict) -> bytes:
+            walkthrough_state = spec.get("walkthrough_state", {})
+            def _sync():
+                svg_str = render_svg_for_state(diagram_spec, walkthrough_state)
+                return svg_to_png(svg_str, width=1920, height=1080)
+            return await loop.run_in_executor(pool, _sync)
+
+        svg_tasks = [_render_svg_png(s.scene_spec_json or {}) for s in scenes]
+
+        narrations, *png_results = await asyncio.gather(
+            narrations_task, *svg_tasks,
+        )
+        pool.shutdown(wait=False)
+
+        # ── Phase 2: persist narration + SVG assets (fast I/O) ──
+        upload_tasks: list[asyncio.Task] = []
+        for idx, (scene, narration_result, png_bytes) in enumerate(
+            zip(scenes, narrations, png_results)
+        ):
             scene.narration_text = narration_result["narration_text"]
             scene.status = SceneStatus.generating
 
@@ -442,108 +465,121 @@ class LessonPipeline:
                 status=AssetStatus.ready,
             ))
 
-            spec = scene.scene_spec_json or {}
-            walkthrough_state = spec.get("walkthrough_state", {})
+            async def _upload_png(s=scene, data=png_bytes, spec=scene.scene_spec_json or {}):
+                img_path = f"assets/{lesson.id}/{s.id}/image.png"
+                img_url = await self.storage.put_file(img_path, data, "image/png")
+                ws = spec.get("walkthrough_state", {})
+                db.add(SceneAsset(
+                    scene_id=s.id,
+                    asset_type=AssetType.image,
+                    provider="svg_renderer",
+                    prompt_version="v1-diagram",
+                    storage_url=img_url,
+                    metadata_json={
+                        "state_id": ws.get("state_id", ""),
+                        "renderer": "svg_diagram",
+                    },
+                    status=AssetStatus.ready,
+                ))
+            upload_tasks.append(asyncio.create_task(_upload_png()))
 
-            svg_string = render_svg_for_state(diagram_spec, walkthrough_state)
-            png_bytes = svg_to_png(svg_string, width=1920, height=1080)
+        await asyncio.gather(*upload_tasks)
 
-            img_path = f"assets/{lesson.id}/{scene.id}/image.png"
-            img_url = await self.storage.put_file(img_path, png_bytes, "image/png")
+        # ── Phase 3: hero image + Veo clip in parallel ──
+        hero_generated = False
+        veo_generated = False
 
-            db.add(SceneAsset(
-                scene_id=scene.id,
-                asset_type=AssetType.image,
-                provider="svg_renderer",
-                prompt_version="v1-diagram",
-                storage_url=img_url,
-                metadata_json={
-                    "state_id": walkthrough_state.get("state_id", ""),
-                    "renderer": "svg_diagram",
-                },
-                status=AssetStatus.ready,
-            ))
-
-            if idx == 0 and not hero_generated:
-                try:
-                    topic = diagram_spec.get("topic", lesson.title or "")
-                    comp_names = ", ".join(
-                        c.get("label", c.get("id", ""))
-                        for c in diagram_spec.get("components", [])
+        async def _gen_hero() -> bool:
+            try:
+                topic = diagram_spec.get("topic", lesson.title or "")
+                comp_names = ", ".join(
+                    c.get("label", c.get("id", ""))
+                    for c in diagram_spec.get("components", [])
+                )
+                hero_prompt = (
+                    f"Create a clean technical architecture diagram that explains how a {topic} works in a modern backend system. "
+                    f"Style: professional system design diagram, white or light background, crisp vector look, "
+                    f"minimal but polished, blue/gray/green accents, readable labels, balanced spacing, "
+                    f"arrows clearly showing request flow. "
+                    f"Show these components from left to right: {comp_names}. "
+                    f"Demonstrate the working with two paths: an allowed request flow (green, 200 OK) and "
+                    f"a blocked request flow (red, 429 Too Many Requests). "
+                    f"Include visual annotations for the algorithm logic, per-user/per-IP request counting, "
+                    f"time window examples, counter increment, and counter reset. "
+                    f"Add a small side panel showing the internal logic steps. "
+                    f"Use modern architecture icons, soft shadows, rounded boxes, and directional arrows. "
+                    f"Make the diagram easy for an interviewer, engineer, or student to understand at a glance."
+                )
+                hero_bytes = await self.image_provider.generate_image(
+                    prompt=hero_prompt,
+                    style=lesson.style_preset.value,
+                    width=1920,
+                    height=1080,
+                )
+                if hero_bytes and len(hero_bytes) > 100:
+                    hero_path = f"assets/{lesson.id}/{scenes[0].id}/hero.png"
+                    hero_url = await self.storage.put_file(
+                        hero_path, hero_bytes, "image/png",
                     )
-                    hero_prompt = (
-                        f"Create a clean technical architecture diagram that explains how a {topic} works in a modern backend system. "
-                        f"Style: professional system design diagram, white or light background, crisp vector look, "
-                        f"minimal but polished, blue/gray/green accents, readable labels, balanced spacing, "
-                        f"arrows clearly showing request flow. "
-                        f"Show these components from left to right: {comp_names}. "
-                        f"Demonstrate the working with two paths: an allowed request flow (green, 200 OK) and "
-                        f"a blocked request flow (red, 429 Too Many Requests). "
-                        f"Include visual annotations for the algorithm logic, per-user/per-IP request counting, "
-                        f"time window examples, counter increment, and counter reset. "
-                        f"Add a small side panel showing the internal logic steps. "
-                        f"Use modern architecture icons, soft shadows, rounded boxes, and directional arrows. "
-                        f"Make the diagram easy for an interviewer, engineer, or student to understand at a glance."
-                    )
-                    hero_bytes = await self.image_provider.generate_image(
-                        prompt=hero_prompt,
-                        style=lesson.style_preset.value,
-                        width=1920,
-                        height=1080,
-                    )
-                    if hero_bytes and len(hero_bytes) > 100:
-                        hero_path = f"assets/{lesson.id}/{scene.id}/hero.png"
-                        hero_url = await self.storage.put_file(
-                            hero_path, hero_bytes, "image/png",
+                    db.add(SceneAsset(
+                        scene_id=scenes[0].id,
+                        asset_type=AssetType.image,
+                        provider="image",
+                        prompt_version="v1-hero",
+                        storage_url=hero_url,
+                        metadata_json={"prompt": hero_prompt, "hero": True},
+                        status=AssetStatus.ready,
+                    ))
+                    logger.info("Pipeline: hero image generated for lesson %s", lesson.id)
+                    return True
+            except Exception as hero_err:
+                logger.warning("Hero image generation failed: %s", hero_err)
+            return False
+
+        async def _gen_veo() -> bool:
+            for scene in scenes:
+                spec = scene.scene_spec_json or {}
+                ws = spec.get("walkthrough_state", {})
+                if (
+                    ws.get("overlay_mode")
+                    and ws.get("state_id", "").lower() not in ("overview", "summary")
+                ):
+                    try:
+                        state_title = ws.get("title", "")
+                        veo_prompt = (
+                            f"Short 3-second animation showing {state_title} in action. "
+                            f"Smooth camera, clean technical style, data flowing through system. "
+                            f"Professional educational visualization."
                         )
-                        db.add(SceneAsset(
-                            scene_id=scene.id,
-                            asset_type=AssetType.image,
-                            provider="image",
-                            prompt_version="v1-hero",
-                            storage_url=hero_url,
-                            metadata_json={"prompt": hero_prompt, "hero": True},
-                            status=AssetStatus.ready,
-                        ))
-                        hero_generated = True
-                        logger.info("Pipeline: hero image generated for lesson %s", lesson.id)
-                except Exception as hero_err:
-                    logger.warning("Hero image generation failed: %s", hero_err)
-
-            if (
-                not veo_generated
-                and walkthrough_state.get("overlay_mode")
-                and walkthrough_state.get("state_id", "").lower() not in ("overview", "summary")
-            ):
-                try:
-                    state_title = walkthrough_state.get("title", "")
-                    veo_prompt = (
-                        f"Short 3-second animation showing {state_title} in action. "
-                        f"Smooth camera, clean technical style, data flowing through system. "
-                        f"Professional educational visualization."
-                    )
-                    video_bytes = await self.video_provider.generate_from_text(
-                        prompt=veo_prompt, duration_sec=3.0,
-                    )
-                    if video_bytes and len(video_bytes) > 500:
-                        vid_path = f"assets/{lesson.id}/{scene.id}/veo.mp4"
-                        vid_url = await self.storage.put_file(
-                            vid_path, video_bytes, "video/mp4",
+                        video_bytes = await self.video_provider.generate_from_text(
+                            prompt=veo_prompt, duration_sec=3.0,
                         )
-                        db.add(SceneAsset(
-                            scene_id=scene.id,
-                            asset_type=AssetType.video,
-                            provider="video",
-                            prompt_version="v1-diagram-veo",
-                            storage_url=vid_url,
-                            metadata_json={"prompt": veo_prompt, "diagram_veo": True},
-                            status=AssetStatus.ready,
-                        ))
-                        veo_generated = True
-                        logger.info("Pipeline: Veo clip generated for state %s", state_title)
-                except Exception as veo_err:
-                    logger.warning("Veo clip generation failed: %s", veo_err)
+                        if video_bytes and len(video_bytes) > 500:
+                            vid_path = f"assets/{lesson.id}/{scene.id}/veo.mp4"
+                            vid_url = await self.storage.put_file(
+                                vid_path, video_bytes, "video/mp4",
+                            )
+                            db.add(SceneAsset(
+                                scene_id=scene.id,
+                                asset_type=AssetType.video,
+                                provider="video",
+                                prompt_version="v1-diagram-veo",
+                                storage_url=vid_url,
+                                metadata_json={"prompt": veo_prompt, "diagram_veo": True},
+                                status=AssetStatus.ready,
+                            ))
+                            logger.info("Pipeline: Veo clip generated for state %s", state_title)
+                            return True
+                    except Exception as veo_err:
+                        logger.warning("Veo clip generation failed: %s", veo_err)
+                    break
+            return False
 
+        hero_generated, veo_generated = await asyncio.gather(
+            _gen_hero(), _gen_veo(),
+        )
+
+        for scene in scenes:
             scene.status = SceneStatus.rendered
 
         await db.flush()
@@ -596,10 +632,9 @@ class LessonPipeline:
             scene_specs, str(lesson.id)
         )
 
-        for scene_idx, (scene, narration_result) in enumerate(zip(scenes, narrations)):
+        for scene, narration_result in zip(scenes, narrations):
             scene.narration_text = narration_result["narration_text"]
             scene.status = SceneStatus.generating
-
             db.add(SceneAsset(
                 scene_id=scene.id,
                 asset_type=AssetType.audio,
@@ -613,141 +648,33 @@ class LessonPipeline:
                 status=AssetStatus.ready,
             ))
 
-            spec = scene.scene_spec_json or {}
-            generated_image_for_scene = False
-            render_mode = spec.get("render_mode", "auto")
+        _MAX_CONCURRENT_VISUALS = 4
+        sem = asyncio.Semaphore(_MAX_CONCURRENT_VISUALS)
 
-            for asset_req in spec.get("asset_requests", []):
-                req_type = asset_req.get("type", "")
-                prompt = asset_req.get("prompt", "")
+        async def _generate_scene_visuals(scene_idx: int, scene: Scene) -> None:
+            async with sem:
+                spec = scene.scene_spec_json or {}
+                generated_image_for_scene = False
+                render_mode = spec.get("render_mode", "auto")
 
-                if req_type == "image" and prompt:
-                    img_prompt = enrich_image_prompt_from_scene_spec(
-                        spec,
-                        lesson.style_preset.value,
-                        lesson.title,
-                        scene_idx,
-                        len(scenes),
-                    )
-                    image_bytes = await self.image_provider.generate_image(
-                        prompt=img_prompt,
-                        style=lesson.style_preset.value,
-                        width=1920,
-                        height=1080,
-                    )
-                    img_path = f"assets/{lesson.id}/{scene.id}/image.png"
-                    img_url = await self.storage.put_file(
-                        img_path, image_bytes, "image/png"
-                    )
-                    db.add(SceneAsset(
-                        scene_id=scene.id,
-                        asset_type=AssetType.image,
-                        provider="image",
-                        prompt_version="v1",
-                        storage_url=img_url,
-                        metadata_json={"prompt": img_prompt},
-                        status=AssetStatus.ready,
-                    ))
-                    generated_image_for_scene = True
+                for asset_req in spec.get("asset_requests", []):
+                    req_type = asset_req.get("type", "")
+                    prompt = asset_req.get("prompt", "")
 
-                elif (
-                    req_type == "video"
-                    and prompt
-                    and spec.get("veo_eligible")
-                    and render_mode != "force_static"
-                ):
-                    max_dur = max(
-                        3.0,
-                        min(asset_req.get("max_duration_sec", 5.0), 5.0),
-                    )
-                    try:
-                        video_bytes = await self.video_provider.generate_from_text(
-                            prompt=prompt,
-                            duration_sec=max_dur,
+                    if req_type == "image" and prompt:
+                        img_prompt = enrich_image_prompt_from_scene_spec(
+                            spec,
+                            lesson.style_preset.value,
+                            lesson.title,
+                            scene_idx,
+                            len(scenes),
                         )
-                        vid_path = f"assets/{lesson.id}/{scene.id}/video.mp4"
-                        vid_url = await self.storage.put_file(
-                            vid_path, video_bytes, "video/mp4"
+                        image_bytes = await self.image_provider.generate_image(
+                            prompt=img_prompt,
+                            style=lesson.style_preset.value,
+                            width=1920,
+                            height=1080,
                         )
-                        db.add(SceneAsset(
-                            scene_id=scene.id,
-                            asset_type=AssetType.video,
-                            provider="video",
-                            prompt_version="v1",
-                            storage_url=vid_url,
-                            metadata_json={
-                                "prompt": prompt,
-                                "max_duration_sec": max_dur,
-                                "veo_score": spec.get("veo_score", 0),
-                            },
-                            status=AssetStatus.ready,
-                        ))
-                    except Exception as veo_err:
-                        logger.warning(
-                            "Veo generation failed for scene %s, using static fallback: %s",
-                            scene.id, veo_err,
-                        )
-
-            # Generate Veo clip for veo-eligible scenes that didn't get one via asset_requests
-            veo_prompt = spec.get("veo_prompt", "")
-            has_video_asset = any(
-                ar.get("type") == "video" for ar in spec.get("asset_requests", [])
-            )
-            if (
-                spec.get("veo_eligible")
-                and veo_prompt
-                and not has_video_asset
-                and render_mode != "force_static"
-            ):
-                try:
-                    veo_dur = max(3.0, min(spec.get("duration_sec", 5), 5.0))
-                    video_bytes = await self.video_provider.generate_from_text(
-                        prompt=veo_prompt, duration_sec=veo_dur,
-                    )
-                    if video_bytes and len(video_bytes) > 500:
-                        vid_path = f"assets/{lesson.id}/{scene.id}/video.mp4"
-                        vid_url = await self.storage.put_file(
-                            vid_path, video_bytes, "video/mp4"
-                        )
-                        db.add(SceneAsset(
-                            scene_id=scene.id,
-                            asset_type=AssetType.video,
-                            provider="video",
-                            prompt_version="v1-fallback-veo",
-                            storage_url=vid_url,
-                            metadata_json={"prompt": veo_prompt, "fallback": True},
-                            status=AssetStatus.ready,
-                        ))
-                        logger.info("Pipeline: fallback Veo clip for scene %s", scene.id)
-                except Exception as veo_err:
-                    logger.warning("Fallback Veo failed for scene %s: %s", scene.id, veo_err)
-
-            # Fallback: generate image for every scene that didn't get one
-            if not generated_image_for_scene:
-                if not spec.get("image_prompt"):
-                    title = spec.get("title", "")
-                    narr = spec.get("narration_text", "")
-                    scene_type = spec.get("scene_type", "concept")
-                    spec = {**spec, "image_prompt": (
-                        f"Educational {scene_type} diagram for: {title}. "
-                        f"Context: {narr[:200]}. "
-                        f"Clean technical illustration, labeled components."
-                    )}
-                fallback_prompt = enrich_image_prompt_from_scene_spec(
-                    spec,
-                    lesson.style_preset.value,
-                    lesson.title,
-                    scene_idx,
-                    len(scenes),
-                )
-                try:
-                    image_bytes = await self.image_provider.generate_image(
-                        prompt=fallback_prompt,
-                        style=lesson.style_preset.value,
-                        width=1920,
-                        height=1080,
-                    )
-                    if image_bytes and len(image_bytes) > 100:
                         img_path = f"assets/{lesson.id}/{scene.id}/image.png"
                         img_url = await self.storage.put_file(
                             img_path, image_bytes, "image/png"
@@ -756,16 +683,133 @@ class LessonPipeline:
                             scene_id=scene.id,
                             asset_type=AssetType.image,
                             provider="image",
-                            prompt_version="v1-fallback",
+                            prompt_version="v1",
                             storage_url=img_url,
-                            metadata_json={"prompt": fallback_prompt, "fallback": True},
+                            metadata_json={"prompt": img_prompt},
                             status=AssetStatus.ready,
                         ))
-                        logger.info("Pipeline: fallback image for scene %s", scene.id)
-                except Exception as img_err:
-                    logger.warning("Fallback image failed for scene %s: %s", scene.id, img_err)
+                        generated_image_for_scene = True
 
-            scene.status = SceneStatus.rendered
+                    elif (
+                        req_type == "video"
+                        and prompt
+                        and spec.get("veo_eligible")
+                        and render_mode != "force_static"
+                    ):
+                        max_dur = max(
+                            3.0,
+                            min(asset_req.get("max_duration_sec", 5.0), 5.0),
+                        )
+                        try:
+                            video_bytes = await self.video_provider.generate_from_text(
+                                prompt=prompt,
+                                duration_sec=max_dur,
+                            )
+                            vid_path = f"assets/{lesson.id}/{scene.id}/video.mp4"
+                            vid_url = await self.storage.put_file(
+                                vid_path, video_bytes, "video/mp4"
+                            )
+                            db.add(SceneAsset(
+                                scene_id=scene.id,
+                                asset_type=AssetType.video,
+                                provider="video",
+                                prompt_version="v1",
+                                storage_url=vid_url,
+                                metadata_json={
+                                    "prompt": prompt,
+                                    "max_duration_sec": max_dur,
+                                    "veo_score": spec.get("veo_score", 0),
+                                },
+                                status=AssetStatus.ready,
+                            ))
+                        except Exception as veo_err:
+                            logger.warning(
+                                "Veo generation failed for scene %s, using static fallback: %s",
+                                scene.id, veo_err,
+                            )
+
+                veo_prompt = spec.get("veo_prompt", "")
+                has_video_asset = any(
+                    ar.get("type") == "video" for ar in spec.get("asset_requests", [])
+                )
+                if (
+                    spec.get("veo_eligible")
+                    and veo_prompt
+                    and not has_video_asset
+                    and render_mode != "force_static"
+                ):
+                    try:
+                        veo_dur = max(3.0, min(spec.get("duration_sec", 5), 5.0))
+                        video_bytes = await self.video_provider.generate_from_text(
+                            prompt=veo_prompt, duration_sec=veo_dur,
+                        )
+                        if video_bytes and len(video_bytes) > 500:
+                            vid_path = f"assets/{lesson.id}/{scene.id}/video.mp4"
+                            vid_url = await self.storage.put_file(
+                                vid_path, video_bytes, "video/mp4"
+                            )
+                            db.add(SceneAsset(
+                                scene_id=scene.id,
+                                asset_type=AssetType.video,
+                                provider="video",
+                                prompt_version="v1-fallback-veo",
+                                storage_url=vid_url,
+                                metadata_json={"prompt": veo_prompt, "fallback": True},
+                                status=AssetStatus.ready,
+                            ))
+                            logger.info("Pipeline: fallback Veo clip for scene %s", scene.id)
+                    except Exception as veo_err:
+                        logger.warning("Fallback Veo failed for scene %s: %s", scene.id, veo_err)
+
+                if not generated_image_for_scene:
+                    local_spec = dict(spec)
+                    if not local_spec.get("image_prompt"):
+                        title = local_spec.get("title", "")
+                        narr = local_spec.get("narration_text", "")
+                        scene_type = local_spec.get("scene_type", "concept")
+                        local_spec["image_prompt"] = (
+                            f"Educational {scene_type} diagram for: {title}. "
+                            f"Context: {narr[:200]}. "
+                            f"Clean technical illustration, labeled components."
+                        )
+                    fallback_prompt = enrich_image_prompt_from_scene_spec(
+                        local_spec,
+                        lesson.style_preset.value,
+                        lesson.title,
+                        scene_idx,
+                        len(scenes),
+                    )
+                    try:
+                        image_bytes = await self.image_provider.generate_image(
+                            prompt=fallback_prompt,
+                            style=lesson.style_preset.value,
+                            width=1920,
+                            height=1080,
+                        )
+                        if image_bytes and len(image_bytes) > 100:
+                            img_path = f"assets/{lesson.id}/{scene.id}/image.png"
+                            img_url = await self.storage.put_file(
+                                img_path, image_bytes, "image/png"
+                            )
+                            db.add(SceneAsset(
+                                scene_id=scene.id,
+                                asset_type=AssetType.image,
+                                provider="image",
+                                prompt_version="v1-fallback",
+                                storage_url=img_url,
+                                metadata_json={"prompt": fallback_prompt, "fallback": True},
+                                status=AssetStatus.ready,
+                            ))
+                            logger.info("Pipeline: fallback image for scene %s", scene.id)
+                    except Exception as img_err:
+                        logger.warning("Fallback image failed for scene %s: %s", scene.id, img_err)
+
+                scene.status = SceneStatus.rendered
+
+        await asyncio.gather(*[
+            _generate_scene_visuals(idx, scene)
+            for idx, scene in enumerate(scenes)
+        ])
 
         await db.flush()
         logger.info(
@@ -1092,6 +1136,90 @@ class LessonPipeline:
         )
         return video_url
 
+    async def run_veo_render(self, db: AsyncSession, lesson: Lesson) -> str:
+        """Generate a long-form explainer from multiple Veo clips + Lyria music."""
+        lesson.status = LessonStatus.rendering
+        await db.flush()
+
+        job = RenderJob(
+            lesson_id=lesson.id,
+            job_type="veo_animation",
+            status=RenderJobStatus.running,
+            progress=0.0,
+            started_at=datetime.now(timezone.utc),
+        )
+        db.add(job)
+        await db.flush()
+
+        plan_result = await db.execute(
+            select(LessonPlan).where(LessonPlan.lesson_id == lesson.id)
+        )
+        plan = plan_result.scalar_one_or_none()
+        if not plan or not plan.diagram_spec_json:
+            job.status = RenderJobStatus.failed
+            job.error_message = "Lesson has no diagram plan. Generate diagram first."
+            job.completed_at = datetime.now(timezone.utc)
+            lesson.status = LessonStatus.error
+            await db.flush()
+            raise ValueError(job.error_message)
+
+        diagram_spec = plan.diagram_spec_json
+        walkthrough = plan.walkthrough_states_json or []
+        topic = (lesson.input_topic or lesson.title or lesson.domain.value or "CS topic").strip()
+
+        veo_render = VeoRenderService(
+            self.video_provider,
+            self.music_provider,
+            self.storage,
+            self.diagram,
+            self.tts,
+        )
+
+        video_url = ""
+        try:
+            video_url = await veo_render.generate_animation(
+                str(lesson.id),
+                topic,
+                diagram_spec,
+                walkthrough if isinstance(walkthrough, list) else [],
+            )
+        except Exception as exc:
+            logger.exception("Pipeline.run_veo_render failed lesson=%s", lesson.id)
+            job.status = RenderJobStatus.failed
+            job.error_message = str(exc)[:1900]
+            job.completed_at = datetime.now(timezone.utc)
+            lesson.status = LessonStatus.error
+            await db.flush()
+            raise
+
+        out_mp4 = (
+            Path(get_settings().LOCAL_STORAGE_PATH).resolve()
+            / "output"
+            / str(lesson.id)
+            / "lesson.mp4"
+        )
+        if not (out_mp4.is_file() and out_mp4.stat().st_size > 512):
+            job.status = RenderJobStatus.failed
+            job.error_message = "Veo animation completed but lesson.mp4 is missing or empty."
+            job.completed_at = datetime.now(timezone.utc)
+            lesson.status = LessonStatus.error
+            await db.flush()
+            raise RuntimeError(job.error_message)
+
+        job.status = RenderJobStatus.completed
+        job.progress = 100.0
+        job.completed_at = datetime.now(timezone.utc)
+        lesson.status = LessonStatus.completed
+        await db.flush()
+        await db.refresh(job)
+
+        logger.info(
+            "Pipeline.run_veo_render: lesson %s -> %s",
+            lesson.id,
+            video_url,
+        )
+        return video_url
+
     async def run_evaluation(self, db: AsyncSession, lesson: Lesson) -> dict:
         """Evaluate lesson quality. Create EvaluationReport."""
         plan_result = await db.execute(
@@ -1279,6 +1407,22 @@ class LessonPipeline:
         job = result.scalars().first()
         if not job:
             raise ValueError("Render job not found after rendering")
+        return job
+
+    async def render_veo(self, lesson_id: uuid.UUID) -> RenderJob:
+        """Veo multi-clip + Lyria animation; returns latest RenderJob."""
+        assert self._db is not None
+        lesson = await self._get_lesson(lesson_id)
+        await self.run_veo_render(self._db, lesson)
+
+        result = await self._db.execute(
+            select(RenderJob)
+            .where(RenderJob.lesson_id == lesson_id)
+            .order_by(RenderJob.created_at.desc())
+        )
+        job = result.scalars().first()
+        if not job:
+            raise ValueError("Render job not found after Veo render")
         return job
 
     async def evaluate(self, lesson_id: uuid.UUID) -> EvaluationReport:

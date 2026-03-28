@@ -18,12 +18,28 @@ import {
   Minimize2,
 } from "lucide-react";
 
+export interface ComponentClickInfo {
+  componentId: string;
+  label: string;
+}
+
 interface DiagramViewerProps {
   lessonId: string;
   className?: string;
+  controlledStateIndex?: number;
+  onStateChange?: (index: number) => void;
+  onDataLoaded?: (data: DiagramData) => void;
+  onComponentClick?: (info: ComponentClickInfo) => void;
 }
 
-export function DiagramViewer({ lessonId, className }: DiagramViewerProps) {
+export function DiagramViewer({
+  lessonId,
+  className,
+  controlledStateIndex,
+  onStateChange,
+  onDataLoaded,
+  onComponentClick,
+}: DiagramViewerProps) {
   const [data, setData] = useState<DiagramData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +58,7 @@ export function DiagramViewer({ lessonId, className }: DiagramViewerProps) {
         if (!cancelled) {
           setData(d);
           setError(null);
+          onDataLoaded?.(d);
         }
       })
       .catch((err) => {
@@ -53,7 +70,15 @@ export function DiagramViewer({ lessonId, className }: DiagramViewerProps) {
     return () => {
       cancelled = true;
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lessonId]);
+
+  useEffect(() => {
+    if (controlledStateIndex !== undefined && controlledStateIndex !== currentStateIndex) {
+      setIsPlaying(false);
+      setCurrentStateIndex(controlledStateIndex);
+    }
+  }, [controlledStateIndex, currentStateIndex]);
 
   const loadSvg = useCallback(
     async (stateId?: string) => {
@@ -97,6 +122,32 @@ export function DiagramViewer({ lessonId, className }: DiagramViewerProps) {
     return () => clearTimeout(timerRef.current);
   }, [isPlaying, currentStateIndex, data]);
 
+  const svgContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleSvgClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (!onComponentClick || !data) return;
+
+      let el = e.target as Element | null;
+      while (el && el !== e.currentTarget) {
+        if (el.closest("[data-component]")) {
+          const group = el.closest("[data-component]")!;
+          const compId = group.getAttribute("data-component") || "";
+          const components =
+            (data.diagram_spec as Record<string, unknown>)?.components as
+              | Array<{ id: string; label?: string }>
+              | undefined;
+          const comp = components?.find((c) => c.id === compId);
+          const label = comp?.label || compId;
+          onComponentClick({ componentId: compId, label });
+          return;
+        }
+        el = el.parentElement;
+      }
+    },
+    [onComponentClick, data],
+  );
+
   const states = data?.walkthrough_states ?? [];
   const currentState: WalkthroughState | null =
     currentStateIndex >= 0 && currentStateIndex < states.length
@@ -105,12 +156,16 @@ export function DiagramViewer({ lessonId, className }: DiagramViewerProps) {
 
   const handlePrev = () => {
     setIsPlaying(false);
-    setCurrentStateIndex((p) => Math.max(-1, p - 1));
+    const next = Math.max(-1, currentStateIndex - 1);
+    setCurrentStateIndex(next);
+    onStateChange?.(next);
   };
 
   const handleNext = () => {
     setIsPlaying(false);
-    setCurrentStateIndex((p) => Math.min(states.length - 1, p + 1));
+    const next = Math.min(states.length - 1, currentStateIndex + 1);
+    setCurrentStateIndex(next);
+    onStateChange?.(next);
   };
 
   const handlePlayPause = () => {
@@ -179,6 +234,8 @@ export function DiagramViewer({ lessonId, className }: DiagramViewerProps) {
       <div className="relative flex-1 min-h-0 bg-white flex items-center justify-center p-4">
         {svgContent ? (
           <div
+            ref={svgContainerRef}
+            onClick={handleSvgClick}
             className="w-full h-full flex items-center justify-center [&>svg]:max-w-full [&>svg]:max-h-full [&>svg]:w-auto [&>svg]:h-auto"
             dangerouslySetInnerHTML={{ __html: svgContent }}
           />
@@ -269,6 +326,7 @@ export function DiagramViewer({ lessonId, className }: DiagramViewerProps) {
                 onClick={() => {
                   setIsPlaying(false);
                   setCurrentStateIndex(i);
+                  onStateChange?.(i);
                 }}
                 className={cn(
                   "flex-1 h-1.5 rounded-full transition-all",

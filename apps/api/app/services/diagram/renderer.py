@@ -192,8 +192,10 @@ def render_svg(
 
     # ── CSS ──
     P.append(f"""<style>
-  .comp-group {{ transition: opacity 0.5s ease, filter 0.5s ease; }}
+  .comp-group {{ transition: opacity 0.5s ease, filter 0.5s ease; cursor: pointer; }}
+  .comp-group:hover {{ filter: drop-shadow(0 0 6px rgba(99,102,241,0.4)); }}
   .comp-group.dimmed {{ opacity: {_DIM_OPACITY}; filter: grayscale(80%); }}
+  .comp-group.dimmed:hover {{ filter: grayscale(80%) drop-shadow(0 0 4px rgba(99,102,241,0.3)); opacity: 0.4; }}
   .comp-group.focused {{ filter: drop-shadow(0 0 8px rgba(21,101,192,0.35)); }}
   .conn-line {{ transition: opacity 0.5s ease, stroke-width 0.3s ease; }}
   .conn-line.dimmed {{ opacity: {_DIM_OPACITY}; }}

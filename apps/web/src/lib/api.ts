@@ -341,6 +341,23 @@ export async function triggerRenderFinal(lessonId: string) {
   return job;
 }
 
+/** Multi-clip Veo animation + Lyria music → `output/.../lesson.mp4`. */
+export async function triggerVeoRender(lessonId: string) {
+  const job = await request<{
+    status: string;
+    error_message?: string | null;
+  }>(`/api/lessons/${lessonId}/render-veo`, {
+    method: "POST",
+  });
+  if (job.status === "failed") {
+    throw new Error(
+      job.error_message ||
+        "Veo animation failed — check API logs (Veo, Vertex Lyria, FFmpeg)."
+    );
+  }
+  return job;
+}
+
 export async function triggerEvaluate(lessonId: string) {
   return request<{
     id: string;

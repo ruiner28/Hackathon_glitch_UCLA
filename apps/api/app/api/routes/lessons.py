@@ -1,3 +1,4 @@
+import logging
 import mimetypes
 import os
 from pathlib import Path
@@ -33,6 +34,8 @@ from app.schemas.responses import (
 )
 from app.services.diagram.renderer import render_svg, render_svg_for_state
 from app.services.pipeline import LessonPipeline
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -138,6 +141,26 @@ async def render_final(lesson_id: UUID, db: AsyncSession = Depends(get_db)):
     lesson = await _get_lesson_or_404(lesson_id, db)
     pipeline = LessonPipeline(db)
     job = await pipeline.render(lesson_id, mode="final")
+    return RenderJobResponse.model_validate(job)
+
+
+@router.post("/lessons/{lesson_id}/render-veo", response_model=RenderJobResponse)
+async def render_veo_animation(lesson_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Multi-clip Veo explainer + Lyria soundtrack, concatenated to lesson.mp4."""
+    lesson = await _get_lesson_or_404(lesson_id, db)
+    pipeline = LessonPipeline(db)
+    try:
+        await pipeline.run_veo_render(db, lesson)
+    except Exception:
+        logger.exception("render-veo failed lesson_id=%s", lesson_id)
+    result = await db.execute(
+        select(RenderJob)
+        .where(RenderJob.lesson_id == lesson_id)
+        .order_by(RenderJob.created_at.desc())
+    )
+    job = result.scalars().first()
+    if not job:
+        raise HTTPException(status_code=500, detail="No render job record after Veo render")
     return RenderJobResponse.model_validate(job)
 
 

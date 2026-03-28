@@ -3,7 +3,6 @@
 import { useEffect, useCallback, useRef, use } from "react";
 import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/header";
-import { Footer } from "@/components/layout/footer";
 import { ProcessingSteps } from "@/components/lesson/processing-steps";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -62,7 +61,7 @@ export default function ProcessingPage({
       {
         fn: () => triggerGenerateDiagram(lessonId).catch(() => null),
         status: "diagram_generation",
-        message: "Generating primary architecture diagram...",
+        message: "Generating architecture diagram...",
       },
       {
         fn: () => triggerCompileScenes(lessonId),
@@ -72,12 +71,12 @@ export default function ProcessingPage({
       {
         fn: () => triggerGenerateAssets(lessonId),
         status: "generating_assets",
-        message: "Generating narration and visual assets...",
+        message: "Generating visuals and narration...",
       },
       {
         fn: () => triggerRenderPreview(lessonId),
         status: "rendering",
-        message: "Rendering video preview...",
+        message: "Rendering preview...",
       },
     ];
 
@@ -109,90 +108,88 @@ export default function ProcessingPage({
   return (
     <>
       <Header />
-      <main className="flex-1 gradient-bg">
-        <div className="container py-16">
-          <div className="mx-auto max-w-lg">
-            <div className="mb-8 text-center">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-                {isComplete ? (
-                  <CheckCircle2 className="h-8 w-8 text-green-600" />
-                ) : hasError ? (
-                  <AlertCircle className="h-8 w-8 text-destructive" />
-                ) : (
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                )}
-              </div>
-              <h1 className="text-2xl font-bold">
-                {isComplete
-                  ? "Lesson Ready!"
-                  : hasError
-                  ? "Processing Error"
-                  : "Building Your Lesson"}
-              </h1>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {processingStatus.message}
-              </p>
+      <main className="flex-1 bg-slate-50 min-h-screen">
+        <div className="max-w-md mx-auto px-6 py-16">
+          <div className="mb-8 text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-white border border-slate-200 shadow-sm">
+              {isComplete ? (
+                <CheckCircle2 className="h-7 w-7 text-green-500" />
+              ) : hasError ? (
+                <AlertCircle className="h-7 w-7 text-destructive" />
+              ) : (
+                <Loader2 className="h-7 w-7 animate-spin text-primary" />
+              )}
             </div>
+            <h1 className="text-xl font-bold text-slate-900">
+              {isComplete
+                ? "Ready!"
+                : hasError
+                  ? "Something went wrong"
+                  : "Building your lesson"}
+            </h1>
+            <p className="mt-1.5 text-sm text-slate-400">
+              {processingStatus.message}
+            </p>
+          </div>
 
-            <Card className="shadow-lg">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">Progress</CardTitle>
-                  <span className="text-sm font-medium text-muted-foreground">
-                    {completedSteps}/{totalSteps}
-                  </span>
-                </div>
-                <Progress value={progressPercent} className="mt-2 h-2" />
-              </CardHeader>
-              <CardContent>
-                <ProcessingSteps
-                  steps={processingStatus.steps}
-                  message={processingStatus.message}
-                />
-              </CardContent>
-            </Card>
+          <Card className="shadow-sm border-slate-200">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-medium text-slate-700">
+                  Progress
+                </CardTitle>
+                <span className="text-xs font-medium text-slate-400">
+                  {completedSteps}/{totalSteps}
+                </span>
+              </div>
+              <Progress value={progressPercent} className="mt-2 h-1.5" />
+            </CardHeader>
+            <CardContent>
+              <ProcessingSteps
+                steps={processingStatus.steps}
+                message={processingStatus.message}
+              />
+            </CardContent>
+          </Card>
 
-            {isComplete && (
-              <div className="mt-6 text-center">
+          {isComplete && (
+            <div className="mt-6 text-center">
+              <Button
+                size="lg"
+                onClick={() => router.push(`/lesson/${lessonId}`)}
+              >
+                Open Lesson
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
+          )}
+
+          {hasError && (
+            <div className="mt-6 text-center space-y-3">
+              <p className="text-sm text-slate-400">
+                You can retry or view partial results.
+              </p>
+              <div className="flex items-center justify-center gap-3">
                 <Button
-                  size="lg"
+                  variant="outline"
+                  onClick={() => {
+                    pipelineStarted.current = false;
+                    runPipeline();
+                  }}
+                >
+                  Retry
+                </Button>
+                <Button
+                  variant="ghost"
                   onClick={() => router.push(`/lesson/${lessonId}`)}
                 >
-                  View Lesson
-                  <ArrowRight className="ml-2 h-4 w-4" />
+                  View Partial
                 </Button>
               </div>
-            )}
-
-            {hasError && (
-              <div className="mt-6 text-center space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  Something went wrong. You can retry the pipeline or view
-                  partial results.
-                </p>
-                <div className="flex items-center justify-center gap-3">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      pipelineStarted.current = false;
-                      runPipeline();
-                    }}
-                  >
-                    Retry
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => router.push(`/lesson/${lessonId}`)}
-                  >
-                    View Partial
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </main>
-      <Footer />
     </>
   );
 }
