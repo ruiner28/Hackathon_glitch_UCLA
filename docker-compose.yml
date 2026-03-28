@@ -1,3 +1,5 @@
+# Optional full stack (Postgres + Redis + API + web). For local dev you can skip Docker
+# and use SQLite — set DATABASE_URL=sqlite+aiosqlite:///./visualcs.db in .env (see README).
 version: '3.8'
 
 services:

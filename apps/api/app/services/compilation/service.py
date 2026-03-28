@@ -12,6 +12,7 @@ RENDER_STRATEGY_MAP = {
     "code_trace": "remotion",
     "system_design_graph": "remotion",
     "summary_scene": "remotion",
+    "primary_visual_walkthrough": "svg_diagram",
 }
 
 MUSIC_MOOD_MAP = {
@@ -21,6 +22,7 @@ MUSIC_MOOD_MAP = {
     "veo_cinematic": "dramatic",
     "generated_still_with_motion": "curious",
     "summary_scene": "uplifting",
+    "primary_visual_walkthrough": "focused",
 }
 
 
@@ -48,6 +50,51 @@ class CompilationService:
             scenes.append(scene)
 
         logger.info("CompilationService: compiled %d scenes", len(scenes))
+        return scenes
+
+    def compile_from_diagram(
+        self,
+        diagram_spec: dict,
+        walkthrough_states: list[dict],
+        topic: str,
+    ) -> list[dict]:
+        """Convert diagram spec + walkthrough states into scene specs.
+
+        Each walkthrough state becomes one scene of type
+        ``primary_visual_walkthrough``.  No LLM call needed — the data is
+        already structured.
+        """
+        scenes: list[dict] = []
+        for idx, state in enumerate(walkthrough_states):
+            spec: dict = {
+                "scene_id": str(uuid.uuid4()),
+                "title": state.get("title", f"Step {idx + 1}"),
+                "learning_objective": "",
+                "source_refs": [],
+                "scene_type": "primary_visual_walkthrough",
+                "style_preset": "clean_academic",
+                "render_strategy": "svg_diagram",
+                "render_mode": "force_static",
+                "duration_sec": state.get("duration_sec", 20),
+                "narration_text": state.get("narration", ""),
+                "on_screen_text": [],
+                "visual_elements": [],
+                "animation_beats": [],
+                "asset_requests": [],
+                "veo_eligible": False,
+                "veo_score": 0.0,
+                "veo_prompt": None,
+                "image_prompt": None,
+                "music_mood": "focused",
+                "teaching_note": "",
+                "walkthrough_state": state,
+                "diagram_topic": topic,
+            }
+            scenes.append(spec)
+        logger.info(
+            "CompilationService: compiled %d diagram-walkthrough scenes for %r",
+            len(scenes), topic,
+        )
         return scenes
 
     def _normalise_scene_spec(self, raw: dict, index: int) -> dict:

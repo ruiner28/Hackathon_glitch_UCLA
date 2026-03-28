@@ -14,6 +14,7 @@ from app.providers.base import LLMProvider
 logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 2
+_MAX_OUTPUT_TOKENS = 16384
 
 _SYSTEM_INSTRUCTION = (
     "You are an expert computer-science educator and instructional designer. "
@@ -21,34 +22,136 @@ _SYSTEM_INSTRUCTION = (
     "Do not include any text outside the JSON object."
 )
 
+# Gemini SDK sometimes injects internal validator error messages into the
+# response stream when using response_mime_type="application/json".
+# These lines corrupt the JSON and must be stripped before parsing.
+_GEMINI_ARTIFACT_RE = re.compile(
+    r"[ \t]*Callback from tool [^\n]*\n?",
+    re.MULTILINE,
+)
 
-def _extract_json(text: str) -> Any:
-    """Extract JSON from an LLM response that may include markdown fences."""
-    text = text.strip()
+
+def _clean_gemini_artifacts(text: str) -> str:
+    """Remove known Gemini SDK artifact lines that corrupt JSON output."""
+    return _GEMINI_ARTIFACT_RE.sub("", text)
+
+
+def _strip_markdown_fences(text: str) -> str:
+    """Remove ``` / ```json at the start; do not require a closing fence (truncated replies)."""
+    t = text.strip()
+    m = re.match(r"^```(?:json)?\s*\n?", t, re.IGNORECASE)
+    if m:
+        t = t[m.end() :].strip()
+    if t.endswith("```"):
+        t = t[: -3].rstrip()
+    return t.strip()
+
+
+def _balanced_json_slice(text: str, start: int, open_ch: str, close_ch: str) -> str | None:
+    """Return substring from first balanced {…} or […] starting at *start*."""
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+            continue
+        if ch == open_ch:
+            depth += 1
+        elif ch == close_ch:
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+def _try_parse(text: str) -> Any | None:
+    """Return parsed JSON or None."""
     try:
         return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    except (json.JSONDecodeError, ValueError):
+        return None
 
-    match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+
+def _extract_json(text: str) -> Any:
+    """Extract JSON from an LLM response, tolerating fences, artifacts, and trailing junk."""
+    cleaned = _clean_gemini_artifacts(text).strip()
+
+    for variant in dict.fromkeys([cleaned, _strip_markdown_fences(cleaned)]):
+        result = _try_parse(variant)
+        if result is not None:
+            return result
+
+    # Full fenced block (both delimiters present)
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)```", cleaned, re.IGNORECASE)
     if match:
-        try:
-            return json.loads(match.group(1).strip())
-        except json.JSONDecodeError:
-            pass
+        result = _try_parse(match.group(1).strip())
+        if result is not None:
+            return result
 
-    for start_char, end_char in [("{", "}"), ("[", "]")]:
-        start = text.find(start_char)
+    # Balanced {…} or […]
+    for open_ch, close_ch in (("{", "}"), ("[", "]")):
+        start = cleaned.find(open_ch)
         if start == -1:
             continue
-        end = text.rfind(end_char)
+        balanced = _balanced_json_slice(cleaned, start, open_ch, close_ch)
+        if balanced:
+            result = _try_parse(balanced)
+            if result is not None:
+                return result
+        end = cleaned.rfind(close_ch)
         if end > start:
-            try:
-                return json.loads(text[start : end + 1])
-            except json.JSONDecodeError:
-                continue
+            result = _try_parse(cleaned[start : end + 1])
+            if result is not None:
+                return result
 
-    raise ValueError(f"Could not extract JSON from LLM response: {text[:200]}")
+    raise ValueError(
+        "Could not extract JSON from LLM response (truncated or invalid). "
+        f"First 400 chars: {cleaned[:400]!r}"
+    )
+
+
+def _as_concept_dict(parsed: Any) -> dict:
+    """Gemini sometimes returns a bare `[nodes]` array instead of `{{nodes, edges}}`."""
+    if isinstance(parsed, dict):
+        return parsed
+    if isinstance(parsed, list):
+        return {"nodes": parsed, "edges": []}
+    raise ValueError(
+        f"Gemini concept extraction returned {type(parsed).__name__}; expected object or array"
+    )
+
+
+def _as_lesson_plan_dict(parsed: Any) -> dict:
+    if isinstance(parsed, dict):
+        return parsed
+    raise ValueError(
+        f"Gemini lesson plan returned {type(parsed).__name__}; expected a JSON object"
+    )
+
+
+def _as_scene_list(parsed: Any) -> list[dict]:
+    if isinstance(parsed, list):
+        return parsed
+    if isinstance(parsed, dict):
+        scenes = parsed.get("scenes")
+        if isinstance(scenes, list):
+            return scenes
+        sections = parsed.get("sections")
+        if isinstance(sections, list):
+            return sections
+    raise ValueError(
+        f"Gemini scene compile returned {type(parsed).__name__}; expected a JSON array"
+    )
 
 
 class GeminiLLMProvider(LLMProvider):
@@ -56,22 +159,43 @@ class GeminiLLMProvider(LLMProvider):
 
     def __init__(self) -> None:
         settings = get_settings()
-        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        key = (settings.GEMINI_API_KEY or "").strip()
+        if not key:
+            raise ValueError(
+                "GEMINI_API_KEY is empty. Set it in your root .env when LLM_PROVIDER=google."
+            )
+        self.client = genai.Client(api_key=key)
         self.model_name = settings.GEMINI_MODEL
         logger.info("GeminiLLM: initialised with model=%s", self.model_name)
 
+    def _response_text(self, response: Any) -> str:
+        text = getattr(response, "text", None)
+        if text and str(text).strip():
+            return str(text)
+        snippet = ""
+        try:
+            snippet = repr(response.model_dump())[:800]
+        except Exception:
+            snippet = repr(response)[:800]
+        raise RuntimeError(
+            "Gemini returned no text (blocked, empty candidates, or unsupported response). "
+            f"Model={self.model_name!r}. Snippet: {snippet}"
+        )
+
     async def _generate(self, prompt: str) -> str:
+        config = types.GenerateContentConfig(
+            system_instruction=_SYSTEM_INSTRUCTION,
+            max_output_tokens=_MAX_OUTPUT_TOKENS,
+        )
         last_err: Exception | None = None
         for attempt in range(1, _MAX_RETRIES + 2):
             try:
                 response = self.client.models.generate_content(
                     model=self.model_name,
                     contents=prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=_SYSTEM_INSTRUCTION,
-                    ),
+                    config=config,
                 )
-                return response.text
+                return self._response_text(response)
             except Exception as exc:
                 last_err = exc
                 logger.warning("GeminiLLM: attempt %d failed: %s", attempt, exc)
@@ -105,9 +229,12 @@ class GeminiLLMProvider(LLMProvider):
   ]
 }}
 
+Constraints:
+- At most 12 nodes and 24 edges; keep each description under 120 characters.
+
 Return ONLY the JSON object."""
         raw = await self._generate(prompt)
-        return _extract_json(raw)
+        return _as_concept_dict(_extract_json(raw))
 
     async def create_lesson_plan(self, concepts: dict, domain: str, style: str) -> dict:
         prompt = f"""Create a detailed lesson plan for a visual CS lesson about **{domain}**.
@@ -140,7 +267,7 @@ Style preference: {style}.
 
 Create 6-8 sections with varied scene types. Return ONLY the JSON object."""
         raw = await self._generate(prompt)
-        return _extract_json(raw)
+        return _as_lesson_plan_dict(_extract_json(raw))
 
     async def compile_scenes(self, lesson_plan: dict, domain: str) -> list[dict]:
         prompt = f"""Convert this lesson plan into detailed scene specifications for **{domain}**.
@@ -191,7 +318,7 @@ Rules:
 - Narration should reference on_screen_text and feel continuous across scenes.
 Return ONLY the JSON array."""
         raw = await self._generate(prompt)
-        return _extract_json(raw)
+        return _as_scene_list(_extract_json(raw))
 
     async def write_narration(self, scene_spec: dict) -> str:
         prompt = f"""Write a clear, engaging narration script for this scene of a visual CS lesson.

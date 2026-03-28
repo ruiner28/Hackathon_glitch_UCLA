@@ -7,6 +7,7 @@ import {
   AlertCircle,
   FileSearch,
   LayoutList,
+  GitBranch,
   Layers,
   Image,
   Film,
@@ -33,6 +34,12 @@ const STEPS: Step[] = [
     label: "Planning",
     description: "Creating lesson plan and scene structure",
     icon: LayoutList,
+  },
+  {
+    key: "diagram_generation",
+    label: "Diagram Generation",
+    description: "Generating primary architecture diagram",
+    icon: GitBranch,
   },
   {
     key: "scene_compilation",

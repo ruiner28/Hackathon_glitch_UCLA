@@ -96,6 +96,7 @@ export interface TranscriptEntry {
 export type ProcessingStep =
   | "extraction"
   | "planning"
+  | "diagram_generation"
   | "scene_compilation"
   | "asset_generation"
   | "rendering";
