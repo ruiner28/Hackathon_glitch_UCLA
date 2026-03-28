@@ -1,0 +1,179 @@
+1
+00:00:03,000 --> 00:00:06,900
+Imagine your API is suddenly hit with ten times its normal traffic. Without rate limiting, your servers would buckle
+
+2
+00:00:07,000 --> 00:00:10,900
+under the load, database connections would max out, and your entire service could go down. Rate limiting is the shield
+
+3
+00:00:11,000 --> 00:00:14,900
+that protects your system. It controls how many requests a client can make in a given time window — ensuring fair usage
+
+4
+00:00:15,000 --> 00:00:18,899
+and preventing both accidental overloads and malicious abuse. In this lesson, we'll explore the core algorithms behind
+
+5
+00:00:19,000 --> 00:00:22,899
+rate limiting, how to implement them at scale, and where to place them in your architecture.
+
+6
+00:00:24,500 --> 00:00:28,899
+The token bucket is the most widely used rate limiting algorithm, and understanding it is key to designing any rate
+
+7
+00:00:29,000 --> 00:00:33,399
+limiter. Here's how it works: tokens are added to a bucket at a fixed rate — say, ten tokens per second. The bucket has
+
+8
+00:00:33,500 --> 00:00:37,899
+a maximum capacity. When a request arrives, it must consume one token. If the bucket is empty, the request is rejected.
+
+9
+00:00:38,000 --> 00:00:42,399
+The beauty of this design is that it naturally allows bursts. If no requests have arrived for a while, tokens accumulate
+
+10
+00:00:42,500 --> 00:00:46,899
+up to the bucket capacity, allowing a short burst of traffic. This makes it ideal for APIs where occasional spikes are
+
+11
+00:00:47,000 --> 00:00:51,399
+expected.
+
+12
+00:00:53,000 --> 00:00:56,733
+While the token bucket allows bursts, the leaky bucket takes the opposite approach — and this distinction is critical
+
+13
+00:00:56,833 --> 00:01:00,566
+for choosing the right algorithm. Think of it as a bucket with a small hole at the bottom. Requests flow in at whatever
+
+14
+00:01:00,666 --> 00:01:04,400
+rate they arrive, but they drain out — that is, get processed — at a constant, fixed rate. If requests arrive faster
+
+15
+00:01:04,500 --> 00:01:08,233
+than the drain rate, the bucket fills up. Once full, excess requests simply overflow and are dropped. This guarantees a
+
+16
+00:01:08,333 --> 00:01:12,066
+perfectly smooth output rate, making it ideal for scenarios where downstream services need a steady, predictable flow of
+
+17
+00:01:12,166 --> 00:01:15,900
+traffic.
+
+18
+00:01:17,500 --> 00:01:21,900
+Both bucket algorithms work well, but fixed time windows have a subtle problem: a burst of requests at the boundary
+
+19
+00:01:22,000 --> 00:01:26,400
+between two windows can effectively double your intended limit. The sliding window counter solves this elegantly.
+
+20
+00:01:26,500 --> 00:01:30,900
+Instead of resetting counters at window boundaries, it uses a weighted combination of the current window's count and the
+
+21
+00:01:31,000 --> 00:01:35,400
+previous window's count. For example, if we're thirty percent into the current window, the effective count is seventy
+
+22
+00:01:35,500 --> 00:01:39,900
+percent of the previous window plus one hundred percent of the current one. This smooths out the boundary spike while
+
+23
+00:01:40,000 --> 00:01:44,400
+keeping memory usage low — just two counters instead of a full request log.
+
+24
+00:01:46,000 --> 00:01:51,900
+In production, you rarely have just one API server. When requests are spread across multiple servers, each needs to
+
+25
+00:01:52,000 --> 00:01:57,900
+check against the same rate limit — and that requires shared state. Redis is the go-to solution here. Using the atomic
+
+26
+00:01:58,000 --> 00:02:03,900
+INCR command paired with EXPIRE, you can implement a distributed counter in just two operations. For more precise
+
+27
+00:02:04,000 --> 00:02:09,900
+sliding windows, Lua scripts running inside Redis ensure atomicity. The challenge is handling race conditions and clock
+
+28
+00:02:10,000 --> 00:02:15,900
+differences across servers, but Redis's single-threaded execution model makes the counter operations inherently safe.
+
+29
+00:02:17,500 --> 00:02:20,733
+Now that we understand the algorithms, where exactly should we enforce rate limits? The most common choice is the API
+
+30
+00:02:20,833 --> 00:02:24,066
+Gateway — it's the single entry point for all traffic, making it easy to apply limits centrally before requests fan out
+
+31
+00:02:24,166 --> 00:02:27,400
+to microservices. For more granular control, you can add rate limiting as middleware within individual services. Some
+
+32
+00:02:27,500 --> 00:02:30,733
+systems use both: a gateway-level limit for overall protection and service-level limits for per-endpoint control.
+
+33
+00:02:30,833 --> 00:02:34,066
+Client-side rate limiting can help as a courtesy, but it should never be your only defense since it can be easily
+
+34
+00:02:34,166 --> 00:02:37,400
+bypassed.
+
+35
+00:02:39,000 --> 00:02:42,300
+When a request exceeds the rate limit, your system needs to respond clearly and helpfully. The standard response is
+
+36
+00:02:42,400 --> 00:02:45,700
+HTTP 429 Too Many Requests, which tells the client exactly what happened. Include a Retry-After header specifying how
+
+37
+00:02:45,800 --> 00:02:49,100
+many seconds the client should wait before trying again. Well-behaved clients will implement exponential backoff —
+
+38
+00:02:49,199 --> 00:02:52,500
+waiting longer after each rejection to avoid hammering the server. It's also important to distinguish between hard
+
+39
+00:02:52,599 --> 00:02:55,900
+limits, which reject immediately, and soft limits, which may queue or delay requests instead of dropping them.
+
+40
+00:02:57,500 --> 00:03:00,233
+Let's bring everything together. When designing a rate limiter, start by choosing your algorithm: use token bucket if
+
+41
+00:03:00,333 --> 00:03:03,066
+you need to allow bursts, leaky bucket for smooth constant-rate processing, or sliding window for precise time-based
+
+42
+00:03:03,166 --> 00:03:05,900
+limiting. For distributed systems, Redis gives you the shared state you need with atomic operations. Place your rate
+
+43
+00:03:06,000 --> 00:03:08,733
+limiter at the API gateway for simplicity, and add per-service limits for granularity. Always return clear HTTP 429
+
+44
+00:03:08,833 --> 00:03:11,566
+responses with Retry-After headers so clients know how to behave. With these pieces in place, your system is protected,
+
+45
+00:03:11,666 --> 00:03:14,400
+fair, and resilient.

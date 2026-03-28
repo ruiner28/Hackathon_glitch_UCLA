@@ -117,66 +117,173 @@ _LESSON_PLANS: dict[str, dict] = {
             {
                 "title": "Why Bottom-Up?",
                 "objective": "Motivate bottom-up parsing by showing limitations of top-down recursive descent",
-                "scene_type": "deterministic_animation",
+                "scene_type": "veo_cinematic",
                 "duration_sec": 35,
-                "key_points": ["Top-down struggles with left recursion", "Bottom-up defers decisions until more input is seen", "More grammars are LR than LL"],
-                "visual_strategy": "Split-screen comparison: top-down tree growing down vs. bottom-up tree growing up with animated node placement",
+                "key_points": [
+                    "Top-down fails on left recursion",
+                    "Bottom-up defers decisions",
+                    "LR handles more grammars than LL",
+                ],
+                "narration": (
+                    "When a compiler reads your source code, it needs to understand its structure — and that "
+                    "process is called parsing. Top-down parsers like recursive descent are intuitive, but they "
+                    "struggle with left-recursive grammars and often need special rewriting. Bottom-up parsing "
+                    "takes the opposite approach: instead of guessing which rule to apply from the top, it reads "
+                    "input tokens and works upward, deferring decisions until it has enough context. This makes "
+                    "it far more powerful — in fact, more grammars are LR-parseable than LL-parseable. In this "
+                    "lesson, we'll trace through the mechanics of bottom-up parsing step by step."
+                ),
+                "visual_strategy": "Split-screen: top-down tree vs bottom-up tree growing in opposite directions",
             },
             {
                 "title": "Shift-Reduce in Action",
                 "objective": "Demonstrate the shift and reduce operations on a concrete example",
                 "scene_type": "code_trace",
                 "duration_sec": 45,
-                "key_points": ["Stack holds partially parsed symbols", "Shift pushes the next token", "Reduce replaces a handle with a non-terminal"],
-                "visual_strategy": "Animated stack with input tape: tokens slide from tape to stack, handle highlights in green, reduce pops and pushes non-terminal",
+                "key_points": [
+                    "Stack ← partially parsed symbols",
+                    "Shift → push next input token",
+                    "Reduce → replace handle with NT",
+                    "Repeat until start symbol",
+                ],
+                "narration": (
+                    "The core engine of bottom-up parsing is the shift-reduce loop. The parser maintains a stack "
+                    "of symbols and reads from an input tape. At each step, it makes one of two decisions. A shift "
+                    "moves the next input token onto the stack. A reduce recognizes that the top of the stack "
+                    "matches the right-hand side of a grammar production — called a handle — and replaces it "
+                    "with the corresponding non-terminal. This process continues until the entire input has been "
+                    "consumed and the stack contains only the start symbol, meaning the input was valid."
+                ),
+                "visual_strategy": "Animated stack with input tape showing shift and reduce operations",
             },
             {
                 "title": "Finding the Handle",
                 "objective": "Explain what a handle is and how the parser identifies it",
                 "scene_type": "deterministic_animation",
                 "duration_sec": 35,
-                "key_points": ["Handle = right side of a production at the top of the stack", "Reducing the handle corresponds to one step of rightmost derivation in reverse", "Incorrect handle choice leads to dead ends"],
-                "visual_strategy": "Stack visualisation with candidate handle regions highlighted; correct handle pulses green",
+                "key_points": [
+                    "Handle = RHS at stack top",
+                    "Matches a production rule",
+                    "Reverse of rightmost derivation",
+                    "Wrong handle → dead end",
+                ],
+                "narration": (
+                    "The critical challenge in shift-reduce parsing is identifying the handle — the substring "
+                    "at the top of the stack that should be reduced. A handle matches the right-hand side of "
+                    "some production, and reducing it corresponds to one step of the rightmost derivation in "
+                    "reverse. Choosing the wrong handle leads to a dead end, where no further reductions are "
+                    "possible. This is exactly why we need a systematic method — the LR parse table — to make "
+                    "this decision deterministically at every step."
+                ),
+                "visual_strategy": "Stack with candidate handle regions highlighted, correct one pulses green",
             },
             {
                 "title": "LR Parse Table",
                 "objective": "Show how the Action-Goto table encodes shift/reduce decisions",
                 "scene_type": "system_design_graph",
                 "duration_sec": 40,
-                "key_points": ["States represent viable prefixes", "Action table: shift/reduce/accept/error", "Goto table: transitions on non-terminals"],
-                "visual_strategy": "Animated table with row/column highlighting as the parser steps through the input",
+                "key_points": [
+                    "States = viable prefixes",
+                    "Action: shift / reduce / accept",
+                    "Goto: non-terminal transitions",
+                    "(state, symbol) → decision",
+                ],
+                "narration": (
+                    "Instead of guessing which action to take, an LR parser uses a precomputed table. The table "
+                    "has two parts. The Action table maps a pair of current state and input terminal to a "
+                    "decision: shift to a new state, reduce by a specific production, accept the input, or "
+                    "report an error. The Goto table handles non-terminals — after a reduce creates a "
+                    "non-terminal, the Goto table tells the parser which state to transition to. Together, "
+                    "these tables make the parser completely deterministic and very fast."
+                ),
+                "visual_strategy": "Table with row/column highlighting as parser steps through input",
             },
             {
                 "title": "Building the AST",
                 "objective": "Show how reduce actions assemble the Abstract Syntax Tree",
                 "scene_type": "deterministic_animation",
                 "duration_sec": 40,
-                "key_points": ["Each reduce creates a new AST node", "Children come from the popped stack symbols", "Final tree represents the program structure"],
-                "visual_strategy": "Dual view: stack on the left shrinking, AST on the right growing with each reduce step",
+                "key_points": [
+                    "Each reduce → new AST node",
+                    "Children from popped symbols",
+                    "Tree grows from leaves up",
+                    "Final tree = program structure",
+                ],
+                "narration": (
+                    "As the parser performs each reduce action, it's not just transforming the stack — it's "
+                    "building the Abstract Syntax Tree. Every time symbols are popped off the stack and replaced "
+                    "by a non-terminal, a new AST node is created with those popped symbols as its children. "
+                    "Because bottom-up parsing starts from the input tokens and works toward the start symbol, "
+                    "the AST grows from the leaves upward. By the time the parser accepts, the complete tree "
+                    "captures the entire hierarchical structure of the program."
+                ),
+                "visual_strategy": "Dual view: stack on left shrinking, AST on right growing with each reduce",
             },
             {
-                "title": "Worked Example: E → E + T | T, T → T * F | F, F → ( E ) | id",
-                "objective": "Full trace of parsing id + id * id",
+                "title": "Worked Example: id + id * id",
+                "objective": "Full trace of parsing id + id * id using a concrete grammar",
                 "scene_type": "code_trace",
                 "duration_sec": 45,
-                "key_points": ["Walk through every shift and reduce", "Show parse table lookups", "Resulting AST respects operator precedence"],
-                "visual_strategy": "Three-panel view: input tape, stack, and growing AST. Each step animates simultaneously.",
+                "key_points": [
+                    "E → E+T | T",
+                    "T → T*F | F",
+                    "F → (E) | id",
+                    "AST respects precedence",
+                ],
+                "narration": (
+                    "Let's trace a complete example. Given the grammar E produces E plus T or T, T produces "
+                    "T times F or F, and F produces parenthesized E or id, let's parse the expression "
+                    "id plus id times id. The parser begins by shifting id, then reduces F to id, then T to F, "
+                    "then E to T. It shifts plus, then id, reduces again through F and T. Then it shifts times "
+                    "and id, reduces F, then T times F to T. Finally E plus T reduces to E, and the parser "
+                    "accepts. Notice that the resulting AST naturally respects operator precedence — "
+                    "multiplication is deeper in the tree than addition."
+                ),
+                "visual_strategy": "Three-panel: input tape, stack, and growing AST animated step by step",
             },
             {
                 "title": "LR Parser Variants",
                 "objective": "Briefly compare SLR, LALR, and Canonical LR",
                 "scene_type": "generated_still_with_motion",
                 "duration_sec": 30,
-                "key_points": ["SLR uses Follow sets — simplest but weakest", "LALR merges states with same core — used by yacc/Bison", "Canonical LR is most powerful but has largest tables"],
-                "visual_strategy": "Venn diagram of grammar classes: SLR ⊂ LALR ⊂ LR(1), with parser tool logos on each ring",
+                "key_points": [
+                    "SLR: Follow sets (simplest)",
+                    "LALR: merged states (yacc/Bison)",
+                    "CLR: full power, large tables",
+                    "SLR ⊂ LALR ⊂ LR(1)",
+                ],
+                "narration": (
+                    "Not all LR parsers are created equal. SLR is the simplest — it uses Follow sets to resolve "
+                    "conflicts but can't handle all LR grammars. LALR improves on this by merging states that "
+                    "share the same core items, and it's what tools like yacc and Bison actually use. Canonical "
+                    "LR is the most powerful variant, able to handle any LR(1) grammar, but at the cost of "
+                    "much larger parse tables. In practice, LALR hits the sweet spot between power and "
+                    "table size, which is why it dominates in real compiler construction."
+                ),
+                "visual_strategy": "Nested diagram of grammar classes: SLR ⊂ LALR ⊂ LR(1)",
             },
             {
                 "title": "Recap & Key Takeaways",
                 "objective": "Summarise the core ideas and connect them to real compiler tools",
                 "scene_type": "summary_scene",
                 "duration_sec": 25,
-                "key_points": ["Bottom-up parsing constructs derivations in reverse", "LR parse tables make it deterministic", "Most production compilers use LALR parsers"],
-                "visual_strategy": "Bullet-point fly-in animation with a miniature AST icon beside each point",
+                "key_points": [
+                    "Bottom-up → reverse derivation",
+                    "Shift-reduce → stack + input",
+                    "Handle → correct reduction",
+                    "Parse table → deterministic",
+                    "LALR → practical sweet spot",
+                ],
+                "narration": (
+                    "Let's recap. Bottom-up parsing works by discovering the rightmost derivation in reverse, "
+                    "building the syntax tree from the leaves up. The shift-reduce mechanism uses a stack and "
+                    "input tape, with the critical challenge being handle identification. LR parse tables solve "
+                    "this deterministically by precomputing every decision. Among the variants, LALR parsers "
+                    "offer the best balance of power and efficiency, and they're the foundation of tools "
+                    "like yacc, Bison, and many modern parser generators. Understanding this machinery gives "
+                    "you insight into how every compiler turns source code into executable programs."
+                ),
+                "visual_strategy": "Checklist with miniature AST icons beside each point",
             },
         ],
     },
@@ -202,64 +309,179 @@ _LESSON_PLANS: dict[str, dict] = {
                 "objective": "Define deadlock with the classic dining-philosophers analogy",
                 "scene_type": "veo_cinematic",
                 "duration_sec": 35,
-                "key_points": ["Permanent blocking of a set of processes", "Each holds a resource another needs", "No process can proceed without external intervention"],
-                "visual_strategy": "Cinematic overhead shot of five philosophers at a round table, chopsticks between them, two reaching for the same chopstick — freeze-frame",
+                "key_points": [
+                    "Permanent blocking of processes",
+                    "Each holds what another needs",
+                    "No progress without intervention",
+                ],
+                "narration": (
+                    "Imagine two cars approaching a single-lane bridge from opposite sides at the same time. "
+                    "Neither can move forward, and neither is willing to back up. That's deadlock — a permanent "
+                    "state where a set of processes are blocked, each holding a resource that another process "
+                    "needs, with no process able to make progress. In operating systems, deadlock can freeze "
+                    "entire applications. Understanding how it forms and how to prevent it is fundamental to "
+                    "building reliable concurrent systems. In this lesson, we'll dissect the four conditions "
+                    "that cause deadlock and explore three strategies to deal with it."
+                ),
+                "visual_strategy": "Cinematic: five philosophers at a round table, each reaching for chopsticks — freeze-frame",
             },
             {
                 "title": "Four Necessary Conditions",
                 "objective": "Introduce mutual exclusion, hold-and-wait, no preemption, and circular wait",
                 "scene_type": "deterministic_animation",
                 "duration_sec": 40,
-                "key_points": ["All four must hold simultaneously", "Removing any one breaks the deadlock", "These are necessary but not sufficient on their own for all resource types"],
-                "visual_strategy": "Four interlocking puzzle pieces, each labelled with a condition, assembling into a skull-and-crossbones deadlock icon",
+                "key_points": [
+                    "1. Mutual exclusion",
+                    "2. Hold and wait",
+                    "3. No preemption",
+                    "4. Circular wait",
+                    "All four must hold simultaneously",
+                ],
+                "narration": (
+                    "Deadlock requires exactly four conditions to hold at the same time. First, mutual "
+                    "exclusion — at least one resource can only be used by one process at a time. Second, hold "
+                    "and wait — a process holds one resource while waiting to acquire another. Third, no "
+                    "preemption — resources cannot be forcibly taken from a process. And fourth, circular wait — "
+                    "there's a circular chain where each process waits for a resource held by the next. "
+                    "These are called the Coffman conditions. If even one is absent, deadlock cannot occur, "
+                    "and that's the key insight behind every prevention strategy."
+                ),
+                "visual_strategy": "Four interlocking puzzle pieces labelled with conditions, assembling into deadlock icon",
             },
             {
                 "title": "Resource Allocation Graph",
                 "objective": "Model processes and resources as a directed graph to detect potential deadlocks",
                 "scene_type": "system_design_graph",
                 "duration_sec": 40,
-                "key_points": ["Circles = processes, rectangles = resources with dots for instances", "Request edge: P → R, Assignment edge: R → P", "A cycle in the RAG may indicate deadlock"],
-                "visual_strategy": "Interactive-style graph: nodes and edges animate in as each request/assignment is described",
+                "key_points": [
+                    "○ = process nodes",
+                    "□ = resource nodes (with dots)",
+                    "P → R = request edge",
+                    "R → P = assignment edge",
+                    "Cycle → possible deadlock",
+                ],
+                "narration": (
+                    "To analyze deadlock systematically, we use a Resource Allocation Graph. Processes are "
+                    "shown as circles, and resources as rectangles with dots representing individual instances. "
+                    "A request edge goes from a process to a resource it's waiting for. An assignment edge goes "
+                    "from a resource instance to the process holding it. The critical insight: if this graph "
+                    "contains a cycle, deadlock may be present. For single-instance resources, a cycle "
+                    "guarantees deadlock. For multi-instance resources, a cycle is necessary but not "
+                    "sufficient — we need additional analysis."
+                ),
+                "visual_strategy": "Graph with process circles and resource rectangles, edges animating in with request/assignment flow",
             },
             {
                 "title": "Deadlock Prevention",
                 "objective": "Show how to structurally eliminate each of the four conditions",
                 "scene_type": "deterministic_animation",
                 "duration_sec": 40,
-                "key_points": ["Eliminate hold-and-wait: request all resources at once", "Allow preemption: forcibly take resources", "Impose ordering to prevent circular wait"],
-                "visual_strategy": "Four mini-animations, one per condition, each showing the prevention technique breaking the deadlock cycle",
+                "key_points": [
+                    "Break hold-and-wait → request all at once",
+                    "Allow preemption → force release",
+                    "Order resources → prevent circular wait",
+                    "Trade-off: restrictive but guaranteed",
+                ],
+                "narration": (
+                    "Prevention works by structurally ensuring that at least one of the four Coffman conditions "
+                    "can never hold. To eliminate hold-and-wait, require processes to request all resources at "
+                    "once before starting — but this wastes resources that sit idle. To allow preemption, "
+                    "forcibly take resources from waiting processes — but this risks data corruption. The "
+                    "most practical technique is imposing a total ordering on resources: if every process "
+                    "must acquire resources in the same numbered order, circular wait becomes impossible. "
+                    "Prevention is restrictive but provides absolute guarantees."
+                ),
+                "visual_strategy": "Four mini-diagrams showing each prevention technique breaking the deadlock cycle",
             },
             {
-                "title": "Deadlock Avoidance & the Banker's Algorithm",
+                "title": "Banker's Algorithm",
                 "objective": "Explain safe/unsafe states and trace the Banker's Algorithm",
                 "scene_type": "code_trace",
                 "duration_sec": 45,
-                "key_points": ["Safe state: there exists at least one safe sequence", "Banker's simulates granting a request and checks safety", "If granting leads to unsafe state, process must wait"],
-                "visual_strategy": "Table-based trace: Available, Max, Allocation, Need matrices animate row by row as the algorithm evaluates each process",
+                "key_points": [
+                    "Safe state → safe sequence exists",
+                    "Need = Max - Allocation",
+                    "Simulate: can process finish?",
+                    "Unsafe → deny the request",
+                ],
+                "narration": (
+                    "Instead of preventing deadlock outright, avoidance takes a smarter approach — it allows "
+                    "resource allocation but checks each request to ensure the system stays in a safe state. "
+                    "A safe state is one where there exists at least one sequence in which every process can "
+                    "finish. The Banker's Algorithm, proposed by Dijkstra, performs this check. For each "
+                    "process, it computes the Need matrix — the difference between maximum demand and current "
+                    "allocation. It then simulates granting the request: if the remaining available resources "
+                    "can satisfy at least one process's needs, that process can finish and release its "
+                    "resources, potentially enabling others. If no safe sequence exists, the request is denied."
+                ),
+                "visual_strategy": "Table trace: Available, Max, Allocation, Need matrices with row-by-row evaluation",
             },
             {
-                "title": "Deadlock Detection & Recovery",
+                "title": "Detection & Recovery",
                 "objective": "Describe detection algorithms and recovery options",
                 "scene_type": "deterministic_animation",
                 "duration_sec": 35,
-                "key_points": ["Wait-for graph cycle detection", "Recovery: terminate processes or preempt resources", "Trade-offs: overhead of periodic detection vs. cost of deadlock"],
-                "visual_strategy": "Animated wait-for graph with cycle highlighted in red; a 'recovery' action breaks an edge",
+                "key_points": [
+                    "Wait-for graph cycle detection",
+                    "Terminate deadlocked processes",
+                    "Preempt resources from victims",
+                    "Detection overhead vs deadlock cost",
+                ],
+                "narration": (
+                    "The third strategy is to simply let deadlocks happen, then detect and recover from them. "
+                    "Detection uses a simplified Resource Allocation Graph called the wait-for graph, where "
+                    "edges connect processes directly. If the wait-for graph contains a cycle, the system is "
+                    "deadlocked. Recovery has two options: terminate one or more deadlocked processes to break "
+                    "the cycle, or preempt resources from a chosen victim process. The key trade-off is how "
+                    "often to run detection — too frequent means wasted overhead, too infrequent means "
+                    "processes stay blocked for longer."
+                ),
+                "visual_strategy": "Wait-for graph with cycle highlighted in red, recovery action breaks an edge",
             },
             {
-                "title": "Real-World Example: Database Transactions",
+                "title": "Real-World: Database Deadlocks",
                 "objective": "Show how databases handle deadlocks with lock ordering and timeouts",
                 "scene_type": "generated_still_with_motion",
                 "duration_sec": 30,
-                "key_points": ["Databases use two-phase locking", "Deadlock detected via wait-for graph", "Victim transaction is rolled back"],
-                "visual_strategy": "Two transaction timelines side by side with lock acquisition arrows, one marked as victim with rollback animation",
+                "key_points": [
+                    "Two-phase locking (2PL)",
+                    "Wait-for graph detection",
+                    "Victim transaction rollback",
+                    "Lock timeout as fallback",
+                ],
+                "narration": (
+                    "Deadlocks aren't just theoretical — they happen in production databases every day. "
+                    "Databases use two-phase locking to ensure serializable transactions, but this can create "
+                    "circular waits when two transactions lock rows in opposite orders. Modern databases like "
+                    "PostgreSQL and MySQL detect deadlocks by maintaining a wait-for graph and checking for "
+                    "cycles. When a cycle is found, the database chooses a victim transaction — typically the "
+                    "one with the least work done — and rolls it back. As an additional safety net, lock "
+                    "timeouts ensure that even missed deadlocks eventually resolve."
+                ),
+                "visual_strategy": "Two transaction timelines with lock arrows crossing, victim marked for rollback",
             },
             {
-                "title": "Summary & Comparison",
+                "title": "Summary & Strategy Comparison",
                 "objective": "Compare all strategies and when to use each",
                 "scene_type": "summary_scene",
                 "duration_sec": 25,
-                "key_points": ["Prevention: restrictive but simple", "Avoidance: flexible but costly", "Detection: permissive but needs recovery mechanism"],
-                "visual_strategy": "Comparison table with strategy rows and columns for overhead, flexibility, and complexity, animated cell-by-cell",
+                "key_points": [
+                    "Prevention → restrictive, guaranteed",
+                    "Avoidance → flexible, O(n²m) cost",
+                    "Detection → permissive, needs recovery",
+                    "Practice: combination of strategies",
+                    "4 conditions → remove one to prevent",
+                ],
+                "narration": (
+                    "Let's summarize. Deadlock requires all four Coffman conditions to hold simultaneously. "
+                    "Prevention removes one condition structurally — simple but restrictive. Avoidance uses the "
+                    "Banker's Algorithm to dynamically check safety — more flexible but with computational "
+                    "overhead. Detection allows deadlocks and then recovers — the most permissive but requires "
+                    "a recovery mechanism. In practice, real systems use a combination: resource ordering for "
+                    "prevention, timeouts for detection, and careful application design to minimize deadlock "
+                    "risk in the first place."
+                ),
+                "visual_strategy": "Comparison table: strategy rows, columns for overhead/flexibility/complexity",
             },
         ],
     },
@@ -285,64 +507,178 @@ _LESSON_PLANS: dict[str, dict] = {
                 "objective": "Motivate rate limiting with a traffic-spike scenario",
                 "scene_type": "veo_cinematic",
                 "duration_sec": 30,
-                "key_points": ["Prevent service overload during traffic spikes", "Ensure fair usage among clients", "Protect against DDoS and abuse"],
-                "visual_strategy": "Cinematic visualisation: a flood of request arrows overwhelming a server, then a shield (rate limiter) appearing and filtering them",
+                "key_points": [
+                    "Prevent service overload",
+                    "Ensure fair client usage",
+                    "Protect against DDoS",
+                ],
+                "narration": (
+                    "Imagine your API is suddenly hit with ten times its normal traffic. "
+                    "Without rate limiting, your servers would buckle under the load, database connections would max out, "
+                    "and your entire service could go down. Rate limiting is the shield that protects your system. "
+                    "It controls how many requests a client can make in a given time window — ensuring fair usage "
+                    "and preventing both accidental overloads and malicious abuse. In this lesson, we'll explore "
+                    "the core algorithms behind rate limiting, how to implement them at scale, and where to place them "
+                    "in your architecture."
+                ),
+                "visual_strategy": "Cinematic: flood of request arrows overwhelming a server, then a shield appearing and filtering them",
             },
             {
                 "title": "Token Bucket Algorithm",
                 "objective": "Explain token bucket mechanics with a visual simulation",
                 "scene_type": "deterministic_animation",
                 "duration_sec": 40,
-                "key_points": ["Tokens added at fixed rate r", "Bucket has maximum capacity b", "Each request consumes one token; rejected if bucket empty", "Allows bursts up to bucket size"],
-                "visual_strategy": "Animated bucket filling with green tokens at steady rate, requests arriving and consuming tokens, bucket depleting during burst",
+                "key_points": [
+                    "Tokens added at rate r/sec",
+                    "Max capacity: b tokens",
+                    "Request → consume 1 token",
+                    "Empty bucket → reject (429)",
+                    "Allows bursts up to b",
+                ],
+                "narration": (
+                    "The token bucket is the most widely used rate limiting algorithm, and understanding it is key to "
+                    "designing any rate limiter. Here's how it works: tokens are added to a bucket at a fixed rate — "
+                    "say, ten tokens per second. The bucket has a maximum capacity. When a request arrives, it must consume "
+                    "one token. If the bucket is empty, the request is rejected. The beauty of this design is that it "
+                    "naturally allows bursts. If no requests have arrived for a while, tokens accumulate up to the bucket "
+                    "capacity, allowing a short burst of traffic. This makes it ideal for APIs where occasional spikes are expected."
+                ),
+                "visual_strategy": "Animated bucket filling with tokens, requests arriving and consuming tokens, burst scenario",
             },
             {
                 "title": "Leaky Bucket Algorithm",
                 "objective": "Compare leaky bucket's constant-rate processing to token bucket",
                 "scene_type": "deterministic_animation",
                 "duration_sec": 35,
-                "key_points": ["Requests enter a queue (bucket)", "Processed at constant rate regardless of arrival pattern", "Excess requests overflow and are dropped", "Smooths out bursts completely"],
-                "visual_strategy": "Water-bucket metaphor: requests are water drops entering the bucket, water leaks out at constant rate through a hole at the bottom",
+                "key_points": [
+                    "Requests queue in bucket",
+                    "Drain at constant rate",
+                    "Overflow → drop excess",
+                    "Smooth output guaranteed",
+                ],
+                "narration": (
+                    "While the token bucket allows bursts, the leaky bucket takes the opposite approach — "
+                    "and this distinction is critical for choosing the right algorithm. Think of it as a bucket "
+                    "with a small hole at the bottom. Requests flow in at whatever rate they arrive, but they "
+                    "drain out — that is, get processed — at a constant, fixed rate. If requests arrive faster "
+                    "than the drain rate, the bucket fills up. Once full, excess requests simply overflow and "
+                    "are dropped. This guarantees a perfectly smooth output rate, making it ideal for scenarios "
+                    "where downstream services need a steady, predictable flow of traffic."
+                ),
+                "visual_strategy": "Water-bucket metaphor: requests enter as water drops, leak out at constant rate",
             },
             {
                 "title": "Sliding Window Counter",
                 "objective": "Show how sliding windows avoid the boundary problem of fixed windows",
                 "scene_type": "code_trace",
                 "duration_sec": 40,
-                "key_points": ["Fixed window has boundary spike issue", "Sliding window log tracks every request timestamp", "Sliding window counter uses weighted previous + current window counts", "Trade-off: accuracy vs. memory"],
-                "visual_strategy": "Timeline with two overlapping windows; request dots slide along and counters update in real time",
+                "key_points": [
+                    "Fixed window → boundary spike",
+                    "weight = prev × (1-t) + curr",
+                    "Smooth counter transition",
+                    "Only 2 counters needed",
+                ],
+                "narration": (
+                    "Both bucket algorithms work well, but fixed time windows have a subtle problem: a burst of "
+                    "requests at the boundary between two windows can effectively double your intended limit. "
+                    "The sliding window counter solves this elegantly. Instead of resetting counters at window "
+                    "boundaries, it uses a weighted combination of the current window's count and the previous "
+                    "window's count. For example, if we're thirty percent into the current window, the effective "
+                    "count is seventy percent of the previous window plus one hundred percent of the current one. "
+                    "This smooths out the boundary spike while keeping memory usage low — just two counters "
+                    "instead of a full request log."
+                ),
+                "visual_strategy": "Timeline with two overlapping windows and weighted counters updating in real time",
             },
             {
                 "title": "Distributed Rate Limiting with Redis",
                 "objective": "Design a distributed rate limiter using Redis atomic operations",
                 "scene_type": "system_design_graph",
                 "duration_sec": 45,
-                "key_points": ["Multiple API servers share state via Redis", "INCR + EXPIRE for fixed-window counting", "Lua scripts for atomic sliding-window logic", "Race conditions and clock synchronisation"],
-                "visual_strategy": "Architecture diagram: multiple API servers connected to Redis cluster, showing INCR/EXPIRE command flow with sequence numbers",
+                "key_points": [
+                    "Shared state via Redis",
+                    "INCR + EXPIRE commands",
+                    "Lua scripts for atomicity",
+                    "Single-threaded safety",
+                ],
+                "narration": (
+                    "In production, you rarely have just one API server. When requests are spread across "
+                    "multiple servers, each needs to check against the same rate limit — and that requires "
+                    "shared state. Redis is the go-to solution here. Using the atomic INCR command paired "
+                    "with EXPIRE, you can implement a distributed counter in just two operations. For more "
+                    "precise sliding windows, Lua scripts running inside Redis ensure atomicity. The challenge "
+                    "is handling race conditions and clock differences across servers, but Redis's single-threaded "
+                    "execution model makes the counter operations inherently safe."
+                ),
+                "visual_strategy": "Architecture: multiple API servers connected to Redis cluster, showing command flow",
             },
             {
                 "title": "Where to Place the Rate Limiter",
                 "objective": "Discuss placement options: client, API gateway, middleware, service",
                 "scene_type": "system_design_graph",
                 "duration_sec": 30,
-                "key_points": ["API Gateway: centralised, easy to manage", "Middleware: per-service granularity", "Client-side: cooperative but bypassable", "Multiple layers for defence in depth"],
-                "visual_strategy": "Layered architecture diagram with rate-limiter badges at each layer, requests flowing through each checkpoint",
+                "key_points": [
+                    "API Gateway (centralized)",
+                    "Service Middleware (granular)",
+                    "Client-side (cooperative)",
+                    "Defense in depth (layers)",
+                ],
+                "narration": (
+                    "Now that we understand the algorithms, where exactly should we enforce rate limits? "
+                    "The most common choice is the API Gateway — it's the single entry point for all traffic, "
+                    "making it easy to apply limits centrally before requests fan out to microservices. "
+                    "For more granular control, you can add rate limiting as middleware within individual "
+                    "services. Some systems use both: a gateway-level limit for overall protection and "
+                    "service-level limits for per-endpoint control. Client-side rate limiting can help as a "
+                    "courtesy, but it should never be your only defense since it can be easily bypassed."
+                ),
+                "visual_strategy": "Layered architecture diagram with rate-limiter badges at each layer",
             },
             {
                 "title": "Handling Throttled Requests",
                 "objective": "Explain HTTP 429, Retry-After headers, and backoff strategies",
                 "scene_type": "generated_still_with_motion",
                 "duration_sec": 25,
-                "key_points": ["Return HTTP 429 Too Many Requests", "Include Retry-After header", "Clients should implement exponential backoff", "Differentiate hard vs. soft limits"],
-                "visual_strategy": "HTTP request/response exchange animation with 429 status code highlighted and a countdown timer for Retry-After",
+                "key_points": [
+                    "HTTP 429 Too Many Requests",
+                    "Retry-After: <seconds>",
+                    "Exponential backoff",
+                    "Hard vs. soft limits",
+                ],
+                "narration": (
+                    "When a request exceeds the rate limit, your system needs to respond clearly and "
+                    "helpfully. The standard response is HTTP 429 Too Many Requests, which tells the client "
+                    "exactly what happened. Include a Retry-After header specifying how many seconds the client "
+                    "should wait before trying again. Well-behaved clients will implement exponential backoff — "
+                    "waiting longer after each rejection to avoid hammering the server. It's also important to "
+                    "distinguish between hard limits, which reject immediately, and soft limits, which may "
+                    "queue or delay requests instead of dropping them."
+                ),
+                "visual_strategy": "HTTP request/response exchange with 429 status code and countdown timer",
             },
             {
                 "title": "Recap & Design Checklist",
-                "objective": "Summarise algorithms and provide a rate-limiter design checklist",
+                "objective": "Summarise all algorithms and provide a rate-limiter design checklist",
                 "scene_type": "summary_scene",
                 "duration_sec": 25,
-                "key_points": ["Choose algorithm based on burst tolerance", "Use Redis for distributed state", "Place limiter at API gateway for simplicity", "Always return clear 429 responses with retry info"],
-                "visual_strategy": "Checklist animation: items fly in with check marks, ending with a miniature architecture diagram",
+                "key_points": [
+                    "Token bucket → allows bursts",
+                    "Leaky bucket → smooth rate",
+                    "Sliding window → precise limits",
+                    "Redis → distributed state",
+                    "API Gateway → central enforcement",
+                    "429 + Retry-After → clear response",
+                ],
+                "narration": (
+                    "Let's bring everything together. When designing a rate limiter, start by choosing your "
+                    "algorithm: use token bucket if you need to allow bursts, leaky bucket for smooth constant-rate "
+                    "processing, or sliding window for precise time-based limiting. For distributed systems, "
+                    "Redis gives you the shared state you need with atomic operations. Place your rate limiter "
+                    "at the API gateway for simplicity, and add per-service limits for granularity. Always "
+                    "return clear HTTP 429 responses with Retry-After headers so clients know how to behave. "
+                    "With these pieces in place, your system is protected, fair, and resilient."
+                ),
+                "visual_strategy": "Checklist with check marks, ending with miniature architecture diagram",
             },
         ],
     },
@@ -353,13 +689,70 @@ _LESSON_PLANS: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 
 
+_VEO_MOTION_KEYWORDS = {
+    "flow", "movement", "moving", "animate", "cycle", "travel", "packet",
+    "request", "arrow", "slide", "transition", "formation", "sequence",
+    "filling", "draining", "growing", "spreading", "cascading",
+}
+
+VEO_MAX_DURATION = 5.0
+
+
+def _score_veo_eligibility(section: dict, scene_type: str, scene_index: int) -> float:
+    """Score how much a scene benefits from motion (0.0–1.0)."""
+    score = 0.0
+
+    type_scores = {
+        "veo_cinematic": 0.8,
+        "generated_still_with_motion": 0.5,
+        "system_design_graph": 0.3,
+        "deterministic_animation": 0.2,
+        "code_trace": 0.1,
+        "summary_scene": 0.0,
+    }
+    score += type_scores.get(scene_type, 0.1)
+
+    # Intro scenes benefit more from cinematic motion
+    if scene_index == 0:
+        score += 0.15
+
+    vs = section.get("visual_strategy", "").lower()
+    keyword_hits = sum(1 for kw in _VEO_MOTION_KEYWORDS if kw in vs)
+    score += min(0.2, keyword_hits * 0.05)
+
+    return min(1.0, round(score, 2))
+
+
+def _build_veo_prompt(section: dict, lesson_title: str) -> str:
+    """Build a focused 5-second motion prompt from scene data."""
+    title = section.get("title", "")
+    vs = section.get("visual_strategy", "")
+    obj = section.get("objective", "")
+
+    prompt = (
+        f"Educational animation, 5 seconds, clean white background, "
+        f"technical diagram style. Topic: {lesson_title} — {title}. "
+    )
+
+    if vs:
+        prompt += f"Visual: {vs}. "
+    elif obj:
+        prompt += f"Concept: {obj}. "
+
+    prompt += (
+        "Smooth motion, no text overlays, no human faces. "
+        "Professional educational video style, 1920x1080, 24fps."
+    )
+    return prompt
+
+
 def _build_scenes_for_plan(plan: dict, domain: str) -> list[dict]:
     """Build full SceneSpec dicts from a lesson-plan's sections."""
     scenes: list[dict] = []
+    lesson_title = plan.get("lesson_title", domain)
     for idx, section in enumerate(plan.get("sections", [])):
         scene_type = section.get("scene_type", "deterministic_animation")
 
-        # Select render strategy based on scene type
         render_strategy_map = {
             "deterministic_animation": "remotion",
             "generated_still_with_motion": "image_to_video",
@@ -370,7 +763,7 @@ def _build_scenes_for_plan(plan: dict, domain: str) -> list[dict]:
         }
         render_strategy = render_strategy_map.get(scene_type, "default")
 
-        narration = _narration_for_section(section, plan.get("lesson_title", domain), idx)
+        narration = section.get("narration") or _narration_for_section(section, lesson_title, idx)
 
         visual_elements = [
             {"type": "title_text", "description": section["title"], "position": "top-center", "style": "bold-32"},
@@ -392,11 +785,21 @@ def _build_scenes_for_plan(plan: dict, domain: str) -> list[dict]:
             else:
                 animation_beats.append({"timestamp_sec": t, "action": "reveal", "description": f"Reveal key point {b}"})
 
+        # Veo eligibility scoring
+        veo_score = _score_veo_eligibility(section, scene_type, idx)
+        veo_eligible = veo_score >= 0.5
+        veo_prompt = _build_veo_prompt(section, lesson_title) if veo_eligible else None
+
         asset_requests = []
         if scene_type in ("generated_still_with_motion", "veo_cinematic"):
             asset_requests.append({"type": "image", "prompt": section.get("visual_strategy", ""), "provider": "image"})
-        if scene_type == "veo_cinematic":
-            asset_requests.append({"type": "video", "prompt": section.get("visual_strategy", ""), "provider": "video"})
+        if veo_eligible:
+            asset_requests.append({
+                "type": "video",
+                "prompt": veo_prompt,
+                "provider": "video",
+                "max_duration_sec": VEO_MAX_DURATION,
+            })
 
         mood_map = {
             "deterministic_animation": "focused",
@@ -409,8 +812,10 @@ def _build_scenes_for_plan(plan: dict, domain: str) -> list[dict]:
 
         scenes.append({
             "scene_id": str(uuid.uuid4()),
+            "lesson_title": lesson_title,
             "title": section["title"],
             "learning_objective": section.get("objective", ""),
+            "teaching_note": section.get("teaching_note", ""),
             "source_refs": [],
             "scene_type": scene_type,
             "render_strategy": render_strategy,
@@ -420,7 +825,9 @@ def _build_scenes_for_plan(plan: dict, domain: str) -> list[dict]:
             "visual_elements": visual_elements,
             "animation_beats": animation_beats,
             "asset_requests": asset_requests,
-            "veo_prompt": section.get("visual_strategy", "") if scene_type == "veo_cinematic" else None,
+            "veo_eligible": veo_eligible,
+            "veo_score": veo_score,
+            "veo_prompt": veo_prompt,
             "image_prompt": section.get("visual_strategy", "") if scene_type in ("generated_still_with_motion", "veo_cinematic") else None,
             "music_mood": mood_map.get(scene_type, "neutral"),
             "validation_notes": "",
@@ -640,81 +1047,613 @@ def _match_topic(text: str) -> str | None:
     return None
 
 
+def _extract_topic_name(text: str) -> str:
+    """Extract the actual topic name from source text or domain string."""
+    for prefix in ["Topic: ", "Create a comprehensive educational lesson about: "]:
+        if prefix.lower() in text.lower():
+            idx = text.lower().index(prefix.lower()) + len(prefix)
+            rest = text[idx:]
+            for sep in [".", ",", "Domain:"]:
+                if sep in rest:
+                    return rest[:rest.index(sep)].strip()
+            return rest.strip()
+    return text.strip()
+
+
+def _build_generic_concept_graph(topic: str) -> dict:
+    """Build a rich concept graph for any topic using its name."""
+    clean = topic.strip().title()
+    topic_id = re.sub(r'[^a-z0-9]+', '_', topic.lower()).strip('_')
+
+    nodes = [
+        {"id": f"{topic_id}_core", "label": clean, "description": f"The fundamental concept of {clean} and its role in computer science.", "importance": 1.0, "prerequisites": []},
+        {"id": f"{topic_id}_definition", "label": f"Definition of {clean}", "description": f"Formal definition and key terminology of {clean}.", "importance": 0.95, "prerequisites": [f"{topic_id}_core"]},
+        {"id": f"{topic_id}_mechanism", "label": f"How {clean} Works", "description": f"The internal mechanism and step-by-step process behind {clean}.", "importance": 0.95, "prerequisites": [f"{topic_id}_definition"]},
+        {"id": f"{topic_id}_types", "label": f"Types & Variants", "description": f"Different types, variants, and classifications of {clean}.", "importance": 0.9, "prerequisites": [f"{topic_id}_mechanism"]},
+        {"id": f"{topic_id}_complexity", "label": "Complexity Analysis", "description": f"Time and space complexity analysis of {clean}.", "importance": 0.85, "prerequisites": [f"{topic_id}_mechanism"]},
+        {"id": f"{topic_id}_tradeoffs", "label": "Trade-offs & Comparisons", "description": f"Comparing different approaches and understanding trade-offs in {clean}.", "importance": 0.85, "prerequisites": [f"{topic_id}_types", f"{topic_id}_complexity"]},
+        {"id": f"{topic_id}_applications", "label": "Real-World Applications", "description": f"How {clean} is used in real software systems and practical scenarios.", "importance": 0.8, "prerequisites": [f"{topic_id}_tradeoffs"]},
+        {"id": f"{topic_id}_pitfalls", "label": "Common Pitfalls", "description": f"Common mistakes and misconceptions when implementing or using {clean}.", "importance": 0.75, "prerequisites": [f"{topic_id}_mechanism"]},
+    ]
+
+    edges = [
+        {"source": f"{topic_id}_core", "target": f"{topic_id}_definition", "relation_type": "defines"},
+        {"source": f"{topic_id}_definition", "target": f"{topic_id}_mechanism", "relation_type": "explains"},
+        {"source": f"{topic_id}_mechanism", "target": f"{topic_id}_types", "relation_type": "categorises"},
+        {"source": f"{topic_id}_mechanism", "target": f"{topic_id}_complexity", "relation_type": "analysed_by"},
+        {"source": f"{topic_id}_types", "target": f"{topic_id}_tradeoffs", "relation_type": "compared_in"},
+        {"source": f"{topic_id}_complexity", "target": f"{topic_id}_tradeoffs", "relation_type": "informs"},
+        {"source": f"{topic_id}_tradeoffs", "target": f"{topic_id}_applications", "relation_type": "applied_in"},
+        {"source": f"{topic_id}_mechanism", "target": f"{topic_id}_pitfalls", "relation_type": "warns_about"},
+    ]
+
+    return {"nodes": nodes, "edges": edges, "title": clean}
+
+
+def _build_generic_lesson_plan(topic: str, concepts: dict) -> dict:
+    """Build a pedagogically structured lesson plan for any topic."""
+    clean = topic.strip().title() if topic else "Computer Science Concepts"
+
+    sections = [
+        {
+            "title": f"What is {clean}?",
+            "objective": f"Define {clean} and motivate why it matters in computer science",
+            "scene_type": "veo_cinematic",
+            "duration_sec": 30,
+            "key_points": [
+                f"{clean} — core CS concept",
+                "Why it matters in practice",
+                "What we'll cover in this lesson",
+            ],
+            "narration": (
+                f"Welcome to this lesson on {clean}. Before we dive into the mechanics, let's understand "
+                f"why {clean} matters. It's a fundamental concept that shows up repeatedly in real systems, "
+                f"from operating systems to distributed applications. By the end of this lesson, you'll "
+                f"understand how {clean} works, when to use it, and how to avoid common pitfalls. "
+                f"Let's start with the core idea."
+            ),
+            "visual_strategy": f"Cinematic introduction with {clean} visualised as a concept map",
+            "teaching_note": "Hook the student with a motivating scenario before formal definitions.",
+        },
+        {
+            "title": f"Core Mechanism of {clean}",
+            "objective": f"Explain the internal workings and step-by-step process of {clean}",
+            "scene_type": "deterministic_animation",
+            "duration_sec": 40,
+            "key_points": [
+                f"How {clean} works internally",
+                "Step-by-step process flow",
+                "Key data structures involved",
+                "Input → processing → output",
+            ],
+            "narration": (
+                f"Now that we know why {clean} is important, let's look at how it actually works. "
+                f"The core mechanism of {clean} involves a step-by-step process where data flows "
+                f"from input through several stages to produce the desired output. Understanding this "
+                f"flow is essential — once you see how each step connects to the next, the entire "
+                f"concept becomes much clearer. Pay attention to the key data structures involved, "
+                f"as they're what make {clean} efficient."
+            ),
+            "visual_strategy": f"Animated flowchart showing {clean} process step by step",
+            "teaching_note": "Build from simple to complex. Show the 'happy path' first.",
+        },
+        {
+            "title": f"Types and Variants",
+            "objective": f"Explore different approaches and variants of {clean}",
+            "scene_type": "system_design_graph",
+            "duration_sec": 35,
+            "key_points": [
+                "Variant A: simplest approach",
+                "Variant B: balanced trade-offs",
+                "Variant C: most powerful",
+                "Choosing the right one",
+            ],
+            "narration": (
+                f"Like most concepts in computer science, {clean} isn't one-size-fits-all. There are "
+                f"several variants, each with different trade-offs. The simplest approach is easy to "
+                f"implement but may not handle all cases. More sophisticated variants offer greater power "
+                f"at the cost of complexity. Understanding these trade-offs is crucial — the right choice "
+                f"depends on your specific constraints: how much memory you have, how fast you need results, "
+                f"and how complex your inputs are."
+            ),
+            "visual_strategy": f"Taxonomy diagram showing different types of {clean}",
+            "teaching_note": "Frame as trade-offs, not 'best' vs 'worst'. Students remember comparisons.",
+        },
+        {
+            "title": "Worked Example",
+            "objective": f"Trace through a concrete example of {clean} in action",
+            "scene_type": "code_trace",
+            "duration_sec": 45,
+            "key_points": [
+                "Set up initial state",
+                "Trace each step carefully",
+                "Observe state changes",
+                "Verify final result",
+            ],
+            "narration": (
+                f"Theory only takes you so far — let's trace through a concrete example. We'll set up "
+                f"a problem, apply {clean} step by step, and observe how the data transforms at each "
+                f"stage. Watch carefully how each step connects to what we discussed earlier. By the end "
+                f"of this trace, you should be able to predict the output for any similar input. This is "
+                f"the kind of exercise that builds the intuition you need for exams and real implementations."
+            ),
+            "visual_strategy": f"Code trace with step-by-step execution of {clean}",
+            "teaching_note": "Go slow here. Students need to trace alongside the visualization.",
+        },
+        {
+            "title": "Complexity & Trade-offs",
+            "objective": f"Analyse time/space complexity and key trade-offs of {clean}",
+            "scene_type": "deterministic_animation",
+            "duration_sec": 35,
+            "key_points": [
+                "Time: best / average / worst",
+                "Space complexity",
+                "Trade-off: speed vs memory",
+                "When complexity matters",
+            ],
+            "narration": (
+                f"Now let's analyze the performance characteristics. Understanding complexity isn't just "
+                f"academic — it directly determines whether your solution will work in production. "
+                f"We'll look at the best-case, average-case, and worst-case time complexity, as well as "
+                f"space requirements. The key trade-off is almost always between speed and memory usage. "
+                f"Knowing these numbers helps you make informed decisions when choosing between "
+                f"different variants of {clean}."
+            ),
+            "visual_strategy": "Complexity comparison chart with Big-O curves",
+            "teaching_note": "Connect complexity to real consequences (will it timeout? run out of memory?)",
+        },
+        {
+            "title": "Real-World Applications",
+            "objective": f"Show where {clean} is used in production systems",
+            "scene_type": "generated_still_with_motion",
+            "duration_sec": 30,
+            "key_points": [
+                "Used in databases & OS",
+                "Web & distributed systems",
+                "Industry implementations",
+                "Choosing the right approach",
+            ],
+            "narration": (
+                f"Where does {clean} actually show up in the real world? It's more common than you might "
+                f"think. Database engines rely on it for query processing. Operating systems use it for "
+                f"resource management. Web applications leverage it for performance optimization. And "
+                f"in distributed systems, understanding {clean} is essential for building scalable "
+                f"architectures. Knowing these applications helps you connect theory to practice."
+            ),
+            "visual_strategy": f"Architecture diagrams showing {clean} in real systems",
+            "teaching_note": "Ground abstract concepts in familiar systems students already use.",
+        },
+        {
+            "title": "Common Pitfalls",
+            "objective": f"Identify mistakes and best practices for {clean}",
+            "scene_type": "deterministic_animation",
+            "duration_sec": 30,
+            "key_points": [
+                "Common implementation errors",
+                "Edge cases to handle",
+                "Best practices",
+                "Testing strategies",
+            ],
+            "narration": (
+                f"Before we wrap up, let's address the mistakes that trip up most students and "
+                f"practitioners. The most common error is overlooking edge cases — situations where the "
+                f"input is empty, has a single element, or contains duplicates. Another frequent mistake "
+                f"is choosing the wrong variant for the problem at hand. Following best practices — "
+                f"testing with boundary cases, starting with the simplest correct solution, and only "
+                f"optimizing when needed — will save you hours of debugging."
+            ),
+            "visual_strategy": "Before/after comparison showing incorrect vs correct approaches",
+            "teaching_note": "Address the exact mistakes students make on homework and exams.",
+        },
+        {
+            "title": "Summary & Key Takeaways",
+            "objective": f"Recap the essential concepts of {clean}",
+            "scene_type": "summary_scene",
+            "duration_sec": 25,
+            "key_points": [
+                f"{clean} → core mechanism",
+                "Variants → choose by trade-off",
+                "Complexity → know your bounds",
+                "Practice → trace examples",
+                "Pitfalls → test edge cases",
+            ],
+            "narration": (
+                f"Let's recap what we've learned. {clean} is a fundamental concept with a clear "
+                f"step-by-step mechanism. Different variants offer different trade-offs between simplicity, "
+                f"speed, and power. Always analyze complexity to ensure your solution scales. Practice by "
+                f"tracing through examples until the process feels automatic. And remember — test edge "
+                f"cases, because that's where most bugs hide. With this foundation, you're ready to "
+                f"apply {clean} confidently in both academic and production contexts."
+            ),
+            "visual_strategy": "Animated recap card with key takeaways",
+            "teaching_note": "Reinforce the 3-4 things they should remember for exams.",
+        },
+    ]
+
+    return {
+        "lesson_title": clean,
+        "target_audience": "undergraduate CS student",
+        "estimated_duration_sec": sum(s["duration_sec"] for s in sections),
+        "objectives": [
+            f"Define and explain the core concepts of {clean}",
+            f"Trace through a worked example of {clean}",
+            f"Analyse the complexity and trade-offs of different {clean} approaches",
+            f"Apply {clean} to solve practical problems",
+        ],
+        "prerequisites": ["Basic programming knowledge", "Data structures fundamentals"],
+        "misconceptions": [
+            f"There is only one way to implement {clean} — multiple variants exist with different trade-offs",
+            f"{clean} is only theoretical — it has critical real-world applications",
+            "Complexity analysis is not important — it directly affects system performance",
+        ],
+        "sections": sections,
+    }
+
+
+def _extract_paper_title(source_text: str) -> str:
+    """Extract the paper title from formatted fragments."""
+    for line in source_text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        # Look for [title:paper_title] tag
+        if "paper_title]" in line.lower():
+            bracket_end = line.index("]")
+            title = line[bracket_end + 1:].strip()
+            if title and len(title) > 3:
+                return title
+        # Fallback: first [title] on page 1
+        if line.lower().startswith("[title]") or line.lower().startswith("[title:"):
+            bracket_end = line.index("]")
+            title = line[bracket_end + 1:].strip()
+            if title and len(title.split()) >= 3 and not _classify_paper_section_from_text(title):
+                return title
+    return ""
+
+
+def _detect_paper_fragments(source_text: str) -> bool:
+    """Check if the source text looks like it came from an academic paper."""
+    lower = source_text.lower()
+    section_markers = ["abstract", "introduction", "conclusion", "method", "results",
+                       "related_work", "background", "paper_title"]
+    hits = sum(1 for m in section_markers if f":{m}]" in lower or f"[{m}]" in lower)
+    return hits >= 2
+
+
+def _extract_paper_sections(source_text: str) -> dict[str, str]:
+    """Group source text lines by academic section labels."""
+    sections: dict[str, list[str]] = {}
+    current_section = "body"
+    for line in source_text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("[") and "]" in line:
+            bracket_end = line.index("]")
+            tag = line[1:bracket_end].lower()
+            text = line[bracket_end + 1:].strip()
+
+            # Handle [kind:section] format from extraction service
+            if ":" in tag:
+                kind, section_label = tag.split(":", 1)
+                if section_label and section_label != "none":
+                    if section_label == "paper_title":
+                        current_section = "body"
+                    else:
+                        current_section = section_label
+                elif kind == "title":
+                    sec = _classify_paper_section_from_text(text)
+                    if sec:
+                        current_section = sec
+            elif tag == "title":
+                sec = _classify_paper_section_from_text(text)
+                if sec:
+                    current_section = sec
+
+            if text:
+                sections.setdefault(current_section, []).append(text)
+        else:
+            sections.setdefault(current_section, []).append(line)
+    return {k: " ".join(v)[:2000] for k, v in sections.items()}
+
+
+def _classify_paper_section_from_text(text: str) -> str | None:
+    """Classify a section heading text into an academic section label."""
+    cleaned = re.sub(r"^\d+\.?\s*", "", text.strip()).lower()
+    mapping = {
+        "abstract": "abstract", "introduction": "introduction",
+        "related work": "related_work", "background": "background",
+        "method": "method", "approach": "method", "model": "method",
+        "architecture": "method", "system": "method", "framework": "method",
+        "experiment": "results", "evaluation": "results", "result": "results",
+        "analysis": "results", "discussion": "discussion",
+        "limitation": "discussion", "conclusion": "conclusion",
+        "summary": "conclusion", "future": "conclusion",
+        "reference": "references", "bibliography": "references",
+    }
+    for key, label in mapping.items():
+        if cleaned.startswith(key):
+            return label
+    return None
+
+
+def _build_paper_concept_graph(title: str, sections: dict[str, str]) -> dict:
+    """Build a concept graph from paper section content."""
+    nodes = [
+        {"id": "paper_core", "label": title, "description": sections.get("abstract", title)[:200], "importance": 1.0, "prerequisites": []},
+    ]
+    edges = []
+
+    section_labels = {
+        "introduction": "Motivation & Context",
+        "related_work": "Related Work",
+        "background": "Background",
+        "method": "Proposed Approach",
+        "results": "Experiments & Results",
+        "discussion": "Analysis & Discussion",
+        "conclusion": "Contributions & Future Work",
+    }
+
+    for sec_key, label in section_labels.items():
+        if sec_key in sections:
+            node_id = sec_key.replace(" ", "_")
+            first_sentence = sections[sec_key].split(".")[0][:150] + "."
+            nodes.append({
+                "id": node_id, "label": label,
+                "description": first_sentence,
+                "importance": 0.8, "prerequisites": ["paper_core"],
+            })
+            edges.append({"source": "paper_core", "target": node_id, "relation_type": "contains"})
+
+    return {
+        "title": title,
+        "nodes": nodes,
+        "edges": edges,
+        "is_paper": True,
+        "paper_sections": sections,
+    }
+
+
+def _build_paper_lesson_plan(title: str, sections: dict[str, str], concepts: dict) -> dict:
+    """Build a lesson plan from an academic paper's extracted sections."""
+    clean = title.strip()
+    plan_sections = []
+
+    # Scene 1: Paper overview
+    abstract_text = sections.get("abstract", f"This paper presents research on {clean}.")[:300]
+    plan_sections.append({
+        "title": f"Paper Overview: {clean}",
+        "objective": "Understand what this paper is about and why it matters",
+        "scene_type": "veo_cinematic",
+        "duration_sec": 30,
+        "key_points": [
+            f"Paper: {clean}",
+            "Core contribution",
+            "Why this research matters",
+        ],
+        "narration": (
+            f"Welcome to this visual walkthrough of the paper: {clean}. "
+            f"Here's the abstract in simplified terms: {abstract_text} "
+            f"By the end of this walkthrough, you'll understand the key ideas, "
+            f"the approach, and the results — without having to read the full paper."
+        ),
+        "visual_strategy": "Clean title card with paper name and key contribution",
+        "teaching_note": "Hook the viewer — explain why they should care about this paper.",
+    })
+
+    # Scene 2: Introduction / Motivation
+    if "introduction" in sections:
+        intro_text = sections["introduction"][:400]
+        plan_sections.append({
+            "title": "Motivation & Problem Statement",
+            "objective": "Understand the problem this paper addresses",
+            "scene_type": "deterministic_animation",
+            "duration_sec": 35,
+            "key_points": [
+                "The problem being solved",
+                "Why existing approaches fall short",
+                "Research gap identified",
+            ],
+            "narration": (
+                f"Let's start with the motivation. {intro_text} "
+                f"In essence, the authors identified a gap in existing approaches "
+                f"and set out to address it with a new method."
+            ),
+            "visual_strategy": "Problem statement diagram with gap highlighted",
+            "teaching_note": "Frame the problem clearly before diving into the solution.",
+        })
+
+    # Scene 3: Background / Related Work
+    bg_text = sections.get("background", sections.get("related_work", ""))
+    if bg_text:
+        plan_sections.append({
+            "title": "Background & Related Work",
+            "objective": "Understand the context and prior work",
+            "scene_type": "system_design_graph",
+            "duration_sec": 30,
+            "key_points": [
+                "Key prior approaches",
+                "What worked and what didn't",
+                "Where this paper builds on",
+            ],
+            "narration": (
+                f"To understand the contribution, we need context. {bg_text[:300]} "
+                f"These prior approaches laid the groundwork, but each had limitations "
+                f"that this paper aims to overcome."
+            ),
+            "visual_strategy": "Timeline or taxonomy of related approaches",
+            "teaching_note": "Don't overwhelm — just enough context to appreciate the contribution.",
+        })
+
+    # Scene 4: Method / Approach (most important)
+    method_text = sections.get("method", "")
+    if method_text:
+        plan_sections.append({
+            "title": "Proposed Approach",
+            "objective": "Understand the core method or architecture",
+            "scene_type": "system_design_graph",
+            "duration_sec": 45,
+            "key_points": [
+                "Core architecture / algorithm",
+                "Key components",
+                "How they connect",
+                "What makes this approach novel",
+            ],
+            "narration": (
+                f"Now the heart of the paper — the proposed approach. {method_text[:400]} "
+                f"The key insight is what makes this method different from prior work. "
+                f"Pay attention to how the components interact — that's where the novelty lies."
+            ),
+            "visual_strategy": "Architecture diagram showing the proposed system or algorithm",
+            "teaching_note": "This is the scene viewers will revisit. Make it clear and structured.",
+        })
+
+    # Scene 5: Results
+    results_text = sections.get("results", "")
+    if results_text:
+        plan_sections.append({
+            "title": "Key Results",
+            "objective": "Evaluate the paper's experimental findings",
+            "scene_type": "code_trace",
+            "duration_sec": 35,
+            "key_points": [
+                "Main experimental setup",
+                "Key metrics and comparisons",
+                "Best results achieved",
+                "What the numbers mean",
+            ],
+            "narration": (
+                f"Let's look at whether this approach actually works. {results_text[:350]} "
+                f"The experiments compare against baseline methods across several metrics. "
+                f"The numbers tell a clear story about the strengths and limitations of this approach."
+            ),
+            "visual_strategy": "Results comparison chart with highlighted improvements",
+            "teaching_note": "Focus on what changed and by how much, not just 'it's better'.",
+        })
+
+    # Scene 6: Discussion / Limitations
+    discussion_text = sections.get("discussion", "")
+    if discussion_text:
+        plan_sections.append({
+            "title": "Discussion & Limitations",
+            "objective": "Critically evaluate strengths and weaknesses",
+            "scene_type": "generated_still_with_motion",
+            "duration_sec": 25,
+            "key_points": [
+                "Main strengths",
+                "Known limitations",
+                "Open questions",
+            ],
+            "narration": (
+                f"No paper is perfect — let's discuss the trade-offs. {discussion_text[:250]} "
+                f"Understanding limitations is just as valuable as understanding contributions. "
+                f"It tells us where future work is needed."
+            ),
+            "visual_strategy": "Strengths vs limitations comparison",
+            "teaching_note": "Teach critical reading — what should a reader question?",
+        })
+
+    # Scene 7: Conclusion / Takeaways
+    conclusion_text = sections.get("conclusion", f"This paper makes key contributions to {clean}.")
+    plan_sections.append({
+        "title": "Key Takeaways",
+        "objective": "Summarize the paper's contributions",
+        "scene_type": "summary_scene",
+        "duration_sec": 25,
+        "key_points": [
+            "Main contribution",
+            "Best result achieved",
+            "Impact on the field",
+            "Future directions",
+        ],
+        "narration": (
+            f"Let's wrap up. {conclusion_text[:300]} "
+            f"If you take away one thing from this paper, it's the core contribution: "
+            f"a new approach to {clean} that advances the state of the art. "
+            f"Future work will likely build on these ideas in exciting directions."
+        ),
+        "visual_strategy": "Summary card with key contributions and impact",
+        "teaching_note": "End with what the reader should remember and cite.",
+    })
+
+    # Ensure at least 5 scenes for a reasonable walkthrough
+    if len(plan_sections) < 4:
+        plan_sections.insert(1, {
+            "title": "Core Concepts",
+            "objective": f"Understand the foundational ideas in {clean}",
+            "scene_type": "deterministic_animation",
+            "duration_sec": 35,
+            "key_points": ["Key concept 1", "Key concept 2", "How they relate"],
+            "narration": (
+                f"Before we dive into the details, let's establish the core concepts. "
+                f"This paper builds on several foundational ideas that you need to understand "
+                f"to appreciate the contribution."
+            ),
+            "visual_strategy": f"Concept map for {clean}",
+            "teaching_note": "Build vocabulary before diving into the method.",
+        })
+
+    return {
+        "lesson_title": clean,
+        "is_paper_walkthrough": True,
+        "target_audience": "graduate CS student or researcher",
+        "estimated_duration_sec": sum(s["duration_sec"] for s in plan_sections),
+        "objectives": [
+            f"Understand the core contribution of '{clean}'",
+            "Evaluate the proposed approach critically",
+            "Summarize key results and limitations",
+        ],
+        "prerequisites": ["Domain-specific background knowledge"],
+        "misconceptions": [
+            "A paper walkthrough replaces reading the paper — it's a complement, not a substitute",
+            "All results should be taken at face value — always check methodology",
+        ],
+        "sections": plan_sections,
+    }
+
+
 class MockLLMProvider(LLMProvider):
     """Mock LLM that returns rich, pre-built educational content for demo purposes."""
 
     async def extract_concepts(self, source_text: str, domain: str) -> dict:
+        if _detect_paper_fragments(source_text):
+            sections = _extract_paper_sections(source_text)
+            paper_title = _extract_paper_title(source_text) or domain
+            logger.info("MockLLM: extract_concepts detected paper '%s' with %d sections",
+                        paper_title, len(sections))
+            return _build_paper_concept_graph(paper_title, sections)
+
         topic = _match_topic(source_text) or _match_topic(domain)
         if topic and topic in _CONCEPT_GRAPHS:
             logger.info("MockLLM: extract_concepts matched topic '%s'", topic)
             return _CONCEPT_GRAPHS[topic]
 
-        # Generic fallback — build a small graph from the input text
-        logger.info("MockLLM: extract_concepts using generic fallback for '%s'", domain)
-        words = [w.strip(".,!?") for w in source_text.split() if len(w) > 3][:6]
-        nodes = [
-            {"id": f"concept_{i}", "label": w.title(), "description": f"Core concept: {w}", "importance": round(1.0 - i * 0.1, 2), "prerequisites": []}
-            for i, w in enumerate(words)
-        ]
-        edges = [
-            {"source": f"concept_{i}", "target": f"concept_{i + 1}", "relation_type": "related_to"}
-            for i in range(len(words) - 1)
-        ]
-        return {"nodes": nodes, "edges": edges}
+        topic_name = _extract_topic_name(source_text)
+        if not topic_name or topic_name.lower() == domain.lower():
+            topic_name = domain
+        logger.info("MockLLM: extract_concepts building graph for '%s'", topic_name)
+        return _build_generic_concept_graph(topic_name)
 
     async def create_lesson_plan(self, concepts: dict, domain: str, style: str) -> dict:
+        if concepts.get("is_paper"):
+            paper_title = concepts.get("title", domain)
+            logger.info("MockLLM: create_lesson_plan building paper walkthrough for '%s'", paper_title)
+            sections = concepts.get("paper_sections", {})
+            if not sections:
+                for node in concepts.get("nodes", []):
+                    nid = node.get("id", "")
+                    if nid != "paper_core":
+                        sections[nid] = node.get("description", "")
+            return _build_paper_lesson_plan(paper_title, sections, concepts)
+
         topic = _match_topic(domain)
         if topic and topic in _LESSON_PLANS:
             logger.info("MockLLM: create_lesson_plan matched topic '%s'", topic)
             return _LESSON_PLANS[topic]
 
-        # Generic fallback
-        logger.info("MockLLM: create_lesson_plan using generic fallback for '%s'", domain)
-        node_labels = [n.get("label", "Concept") for n in concepts.get("nodes", [])[:4]]
-        sections = [
-            {
-                "title": "Introduction",
-                "objective": f"Introduce the fundamentals of {domain}",
-                "scene_type": "deterministic_animation",
-                "duration_sec": 35,
-                "key_points": [f"What is {domain}?", "Why does it matter?"],
-                "visual_strategy": "Title card with animated text and domain icon",
-            },
-        ]
-        for label in node_labels:
-            sections.append({
-                "title": label,
-                "objective": f"Explain {label} in the context of {domain}",
-                "scene_type": "deterministic_animation",
-                "duration_sec": 35,
-                "key_points": [f"Definition of {label}", f"Role of {label} in {domain}"],
-                "visual_strategy": f"Diagram highlighting {label} and its relationships",
-            })
-        sections.append({
-            "title": "Worked Example",
-            "objective": f"Walk through a concrete example of {domain}",
-            "scene_type": "code_trace",
-            "duration_sec": 40,
-            "key_points": ["Step-by-step trace", "Connect theory to practice"],
-            "visual_strategy": "Code editor or diagram with step highlights",
-        })
-        sections.append({
-            "title": "Summary",
-            "objective": "Recap key takeaways",
-            "scene_type": "summary_scene",
-            "duration_sec": 25,
-            "key_points": [f"Core ideas of {domain}", "Next steps for deeper learning"],
-            "visual_strategy": "Bullet list fly-in with recap icons",
-        })
-        return {
-            "lesson_title": domain,
-            "target_audience": "undergraduate CS student",
-            "estimated_duration_sec": sum(s["duration_sec"] for s in sections),
-            "objectives": [f"Understand {domain}", f"Apply key concepts of {domain}"],
-            "prerequisites": [],
-            "misconceptions": [],
-            "sections": sections,
-        }
+        topic_name = concepts.get("title") or _extract_topic_name(domain) or domain
+        logger.info("MockLLM: create_lesson_plan building plan for '%s'", topic_name)
+        return _build_generic_lesson_plan(topic_name, concepts)
 
     async def compile_scenes(self, lesson_plan: dict, domain: str) -> list[dict]:
         logger.info("MockLLM: compile_scenes for '%s'", lesson_plan.get("lesson_title", domain))
@@ -740,72 +1679,142 @@ class MockLLMProvider(LLMProvider):
             logger.info("MockLLM: generate_quiz matched topic '%s'", topic)
             return _QUIZZES[topic]
 
-        # Generic fallback
-        logger.info("MockLLM: generate_quiz using generic fallback for '%s'", domain)
-        return [
+        topic_name = _extract_topic_name(domain) or domain
+        logger.info("MockLLM: generate_quiz building questions for '%s'", topic_name)
+
+        scene_titles = [s.get("title", "") for s in scenes[:4]] if scenes else []
+        key_points_all = []
+        for s in scenes[:4]:
+            key_points_all.extend(s.get("on_screen_text", [])[:2])
+
+        questions = [
             {
-                "question": f"What is the primary purpose of {domain}?",
+                "question": f"What is the primary purpose of {topic_name}?",
                 "options": [
-                    f"To implement {domain} in hardware",
-                    f"To understand and apply the core principles of {domain}",
-                    f"To replace all existing approaches to {domain}",
-                    f"To memorise definitions related to {domain}",
+                    f"To implement {topic_name} in hardware circuits",
+                    f"To understand and apply the core principles of {topic_name} for efficient computing",
+                    f"To replace all existing programming languages",
+                    f"To memorise formulas without understanding",
                 ],
                 "correct_answer": 1,
-                "explanation": f"The primary purpose of studying {domain} is to understand and apply its core principles in practical scenarios.",
-            },
-            {
-                "question": f"Which of the following best describes {domain}?",
-                "options": [
-                    "A hardware-level optimisation",
-                    "A user-interface design pattern",
-                    lesson_plan.get("objectives", ["A fundamental CS concept"])[0] if lesson_plan.get("objectives") else "A fundamental CS concept",
-                    "An obsolete technique",
-                ],
-                "correct_answer": 2,
-                "explanation": f"{domain} is best described by its primary learning objective.",
-            },
-            {
-                "question": f"In the context of {domain}, which step typically comes first?",
-                "options": [
-                    "Evaluation",
-                    "Implementation",
-                    "Understanding the problem",
-                    "Optimisation",
-                ],
-                "correct_answer": 2,
-                "explanation": "Understanding the problem is always the first step before implementation or optimisation.",
+                "explanation": f"The primary purpose of studying {topic_name} is to understand and apply its core principles for building efficient software systems.",
             },
         ]
 
+        if len(key_points_all) >= 2:
+            questions.append({
+                "question": f"Which of the following is a key aspect of {topic_name}?",
+                "options": [
+                    "User interface design patterns",
+                    key_points_all[0] if key_points_all else f"Understanding {topic_name} fundamentals",
+                    "Network protocol specifications",
+                    "Database schema normalisation",
+                ],
+                "correct_answer": 1,
+                "explanation": f"This is a fundamental concept covered in the {topic_name} lesson.",
+            })
+
+        questions.append({
+            "question": f"When analysing {topic_name}, which type of complexity is most commonly discussed?",
+            "options": [
+                "Code complexity (lines of code)",
+                "Time and space complexity using Big-O notation",
+                "Team organisational complexity",
+                "User experience complexity",
+            ],
+            "correct_answer": 1,
+            "explanation": "Time and space complexity analysis using Big-O notation is the standard way to analyse algorithmic performance.",
+        })
+
+        if scene_titles and len(scene_titles) > 2:
+            questions.append({
+                "question": f"In the context of {topic_name}, which step typically comes first?",
+                "options": [
+                    "Optimisation and tuning",
+                    "Benchmarking against alternatives",
+                    "Understanding the problem and defining the approach",
+                    "Deploying to production",
+                ],
+                "correct_answer": 2,
+                "explanation": "Understanding the problem is always the first step before implementing or optimising any solution.",
+            })
+
+        questions.append({
+            "question": f"Why is it important to know multiple approaches to {topic_name}?",
+            "options": [
+                "To make code more complex",
+                "Different approaches have different trade-offs; choosing the right one depends on the use case",
+                "Only one approach is ever correct",
+                "Multiple approaches are only needed for exams",
+            ],
+            "correct_answer": 1,
+            "explanation": f"Different approaches to {topic_name} offer different trade-offs in time complexity, space complexity, and implementation complexity. Choosing the right one depends on the specific constraints of your problem.",
+        })
+
+        return questions
+
     async def evaluate_lesson(self, lesson_data: dict) -> dict:
-        logger.info("MockLLM: evaluate_lesson")
+        logger.info("MockLLM: evaluate_lesson (context-aware)")
+        scenes = lesson_data.get("scenes", [])
+        title = lesson_data.get("title", "")
+        scene_count = len(scenes)
+
+        has_narration = sum(1 for s in scenes if (s.get("narration_text") or "").strip())
+        has_visuals = sum(1 for s in scenes if s.get("visual_elements") or s.get("on_screen_text"))
+        types = set(s.get("scene_type", "") for s in scenes)
+        type_variety = len(types)
+
+        content_score = min(0.95, 0.75 + 0.03 * has_narration)
+        pedagogy_score = min(0.95, 0.70 + 0.04 * min(scene_count, 6))
+        visual_score = min(0.92, 0.65 + 0.04 * type_variety + 0.02 * has_visuals)
+        narration_score = min(0.93, 0.70 + 0.03 * has_narration)
+        engagement_score = min(0.90, 0.65 + 0.05 * min(type_variety, 5))
+
+        overall = round(
+            0.25 * content_score + 0.25 * pedagogy_score +
+            0.20 * visual_score + 0.15 * narration_score +
+            0.15 * engagement_score, 3
+        )
+
+        suggestions = []
+        if scene_count < 5:
+            suggestions.append(f"Only {scene_count} scenes — consider adding more depth")
+        if type_variety < 3:
+            suggestions.append("Low variety in scene types — mix animation, code trace, and diagrams")
+        if has_narration < scene_count:
+            suggestions.append(f"{scene_count - has_narration} scenes lack narration — fill these for completeness")
+        if "summary_scene" not in types:
+            suggestions.append("Add a recap/summary scene to reinforce key takeaways")
+        suggestions.append(f"'{title}' lesson: consider linking to further reading or next topics")
+
         return {
-            "overall_score": 0.87,
+            "overall_score": overall,
             "content_accuracy": {
-                "score": 0.92,
-                "feedback": "Content is technically accurate with correct definitions and relationships between concepts. All key terminology is used correctly.",
+                "score": round(content_score, 2),
+                "feedback": f"Content covers {scene_count} sections with {has_narration} narrated. "
+                            "Key terminology is used correctly across scenes.",
             },
             "pedagogical_quality": {
-                "score": 0.88,
-                "feedback": "Good scaffolding from simple to complex ideas. The worked example effectively bridges theory and practice. Consider adding one more intermediate example.",
+                "score": round(pedagogy_score, 2),
+                "feedback": "Good scaffolding from concepts to applications. "
+                            "The lesson builds progressively." if scene_count >= 4
+                            else "Lesson is brief — consider adding worked examples.",
             },
             "visual_quality": {
-                "score": 0.82,
-                "feedback": "Visual strategies are well-chosen for each scene type. The animations support understanding rather than distracting. Dual-view panels are particularly effective.",
+                "score": round(visual_score, 2),
+                "feedback": f"{type_variety} distinct scene types provide visual variety. "
+                            "Diagrams and animations support understanding.",
             },
             "narration_quality": {
-                "score": 0.85,
-                "feedback": "Narration is clear and maintains an appropriate pace. Transitions between scenes are smooth. Some sentences could be shortened for better retention.",
+                "score": round(narration_score, 2),
+                "feedback": "Narration maintains appropriate pace and clarity. "
+                            "Transitions between scenes flow naturally.",
             },
             "engagement": {
-                "score": 0.80,
-                "feedback": "Good variety of scene types keeps attention. The cinematic opening is engaging. The quiz questions test understanding rather than recall.",
+                "score": round(engagement_score, 2),
+                "feedback": f"Scene variety ({type_variety} types) keeps attention. "
+                            "The lesson structure supports sustained engagement.",
             },
             "flags": [],
-            "suggestions": [
-                "Consider adding a brief 'common mistakes' scene before the summary",
-                "The worked-example scene could benefit from a pause-and-predict moment",
-                "Adding timestamps or progress indicators would help learners navigate",
-            ],
+            "suggestions": suggestions[:5],
         }

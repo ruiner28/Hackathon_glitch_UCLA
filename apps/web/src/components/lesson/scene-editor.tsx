@@ -5,8 +5,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import { RefreshCw, Save, BookOpen, Clock } from "lucide-react";
+import {
+  RefreshCw,
+  Save,
+  BookOpen,
+  Clock,
+  ImageIcon,
+  Clapperboard,
+  Loader2,
+} from "lucide-react";
 import type { Scene } from "@/types";
 
 const sceneTypeColors: Record<string, string> = {
@@ -32,32 +41,43 @@ interface SceneEditorProps {
   onSave: (updates: {
     narration_text: string;
     on_screen_text: string[];
+    duration_sec?: number;
   }) => void;
   onRegenerate: () => void;
+  onRegenerateAssets?: () => void;
+  onToggleVeo?: (enabled: boolean) => void;
   isSaving?: boolean;
   isRegenerating?: boolean;
+  isRegeneratingAssets?: boolean;
 }
 
 export function SceneEditor({
   scene,
   onSave,
   onRegenerate,
+  onRegenerateAssets,
+  onToggleVeo,
   isSaving = false,
   isRegenerating = false,
+  isRegeneratingAssets = false,
 }: SceneEditorProps) {
   const narrationText = scene.narration_text || "";
   const onScreenTextArr = scene.on_screen_text_json || [];
 
   const [narration, setNarration] = useState(narrationText);
   const [onScreenText, setOnScreenText] = useState(onScreenTextArr.join("\n"));
+  const [duration, setDuration] = useState(scene.duration_sec);
 
   const colorClass =
     sceneTypeColors[scene.scene_type] ||
     "bg-gray-100 text-gray-800 border-gray-200";
 
+  const isVeoEligible = !!(scene.scene_spec_json?.veo_eligible);
+
   const hasChanges =
     narration !== narrationText ||
-    onScreenText !== onScreenTextArr.join("\n");
+    onScreenText !== onScreenTextArr.join("\n") ||
+    duration !== scene.duration_sec;
 
   function handleSave() {
     onSave({
@@ -66,6 +86,7 @@ export function SceneEditor({
         .split("\n")
         .map((t) => t.trim())
         .filter(Boolean),
+      duration_sec: duration !== scene.duration_sec ? duration : undefined,
     });
   }
 
@@ -84,12 +105,54 @@ export function SceneEditor({
           <Badge variant="outline" className="text-xs">
             {scene.render_strategy}
           </Badge>
-          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Clock className="h-3 w-3" />
-            {scene.duration_sec}s
-          </span>
         </div>
       </div>
+
+      <Separator />
+
+      {/* Duration control */}
+      <div className="space-y-1.5">
+        <Label htmlFor="duration" className="flex items-center gap-1.5">
+          <Clock className="h-3.5 w-3.5" />
+          Duration (seconds)
+        </Label>
+        <Input
+          id="duration"
+          type="number"
+          min={3}
+          max={120}
+          value={duration}
+          onChange={(e) => setDuration(Number(e.target.value))}
+          className="w-32"
+        />
+      </div>
+
+      {/* Veo Toggle */}
+      {onToggleVeo && (
+        <div className="flex items-center justify-between rounded-lg border p-3 bg-card">
+          <div className="flex items-center gap-2">
+            <Clapperboard className="h-4 w-4 text-violet-500" />
+            <div>
+              <p className="text-sm font-medium">Veo Motion Clip</p>
+              <p className="text-xs text-muted-foreground">5s cinematic clip for this scene</p>
+            </div>
+          </div>
+          <button
+            onClick={() => onToggleVeo(!isVeoEligible)}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+              isVeoEligible ? "bg-violet-600" : "bg-muted"
+            }`}
+            role="switch"
+            aria-checked={isVeoEligible}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transform transition-transform ${
+                isVeoEligible ? "translate-x-5" : "translate-x-0"
+              }`}
+            />
+          </button>
+        </div>
+      )}
 
       <Separator />
 
@@ -126,7 +189,7 @@ export function SceneEditor({
           <ul className="space-y-1">
             {sourceRefs.map((ref, i) => (
               <li
-                key={i}
+                key={`ref-${scene.id}-${i}`}
                 className="text-xs text-muted-foreground bg-muted rounded px-2 py-1"
               >
                 {ref}
@@ -138,26 +201,49 @@ export function SceneEditor({
 
       <Separator />
 
-      <div className="flex items-center gap-2">
-        <Button
-          onClick={handleSave}
-          disabled={!hasChanges || isSaving}
-          size="sm"
-        >
-          <Save className="mr-1.5 h-4 w-4" />
-          {isSaving ? "Saving..." : "Save Changes"}
-        </Button>
-        <Button
-          onClick={onRegenerate}
-          disabled={isRegenerating}
-          variant="outline"
-          size="sm"
-        >
-          <RefreshCw
-            className={`mr-1.5 h-4 w-4 ${isRegenerating ? "animate-spin" : ""}`}
-          />
-          {isRegenerating ? "Regenerating..." : "Regenerate"}
-        </Button>
+      {/* Action Buttons */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={handleSave}
+            disabled={!hasChanges || isSaving}
+            size="sm"
+          >
+            {isSaving ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-1.5 h-4 w-4" />
+            )}
+            {isSaving ? "Saving..." : "Save Changes"}
+          </Button>
+          <Button
+            onClick={onRegenerate}
+            disabled={isRegenerating}
+            variant="outline"
+            size="sm"
+          >
+            <RefreshCw
+              className={`mr-1.5 h-4 w-4 ${isRegenerating ? "animate-spin" : ""}`}
+            />
+            {isRegenerating ? "Regenerating..." : "Regenerate Scene"}
+          </Button>
+        </div>
+        {onRegenerateAssets && (
+          <Button
+            onClick={onRegenerateAssets}
+            disabled={isRegeneratingAssets}
+            variant="outline"
+            size="sm"
+            className="w-full"
+          >
+            {isRegeneratingAssets ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <ImageIcon className="mr-1.5 h-4 w-4" />
+            )}
+            {isRegeneratingAssets ? "Regenerating Assets..." : "Regenerate Image & Audio"}
+          </Button>
+        )}
       </div>
     </div>
   );

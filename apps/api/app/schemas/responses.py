@@ -129,12 +129,17 @@ class TranscriptSceneEntry(BaseModel):
     text: str
     timestamp: float
     duration_sec: float
+    scene_type: str = ""
+    learning_objective: str = ""
+    teaching_note: str = ""
 
 
 class TranscriptResponse(BaseModel):
     full_text: str
     total_duration_sec: float = 0.0
     scenes: list[TranscriptSceneEntry] = Field(default_factory=list)
+    misconceptions: list[str] = Field(default_factory=list)
+    prerequisites: list[str] = Field(default_factory=list)
 
 
 class ProgressResponse(BaseModel):

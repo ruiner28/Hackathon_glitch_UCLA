@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, useCallback, use } from "react";
 import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { SceneCard } from "@/components/lesson/scene-card";
 import { SceneEditor } from "@/components/lesson/scene-editor";
 import {
@@ -13,6 +12,10 @@ import {
   getLessonScenes,
   updateScene,
   regenerateScene,
+  regenerateSceneAssets,
+  reorderScenes,
+  updateLessonStyle,
+  toggleSceneVeo,
   triggerRenderFinal,
 } from "@/lib/api";
 import { useLessonStore } from "@/hooks/useLesson";
@@ -23,6 +26,10 @@ import {
   Download,
   Play,
   Monitor,
+  Clapperboard,
+  ChevronUp,
+  ChevronDown,
+  Palette,
 } from "lucide-react";
 
 export default function LessonEditorPage({
@@ -45,7 +52,10 @@ export default function LessonEditorPage({
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [isRegeneratingAssets, setIsRegeneratingAssets] = useState(false);
   const [isRendering, setIsRendering] = useState(false);
+  const [stylePreset, setStylePreset] = useState("clean_academic");
+  const [isChangingStyle, setIsChangingStyle] = useState(false);
 
   const selectedScene = scenes.find((s) => s.id === selectedSceneId) || null;
 
@@ -58,6 +68,7 @@ export default function LessonEditorPage({
         ]);
         setLesson(lesson as unknown as Lesson);
         setScenes(lessonScenes as unknown as Scene[]);
+        setStylePreset(lesson.style_preset || "clean_academic");
         if (lessonScenes.length > 0) {
           selectScene(lessonScenes[0].id);
         }
@@ -73,14 +84,19 @@ export default function LessonEditorPage({
   async function handleSaveScene(updates: {
     narration_text: string;
     on_screen_text: string[];
+    duration_sec?: number;
   }) {
     if (!selectedScene) return;
     setIsSaving(true);
     try {
-      await updateScene(selectedScene.id, updates);
+      await updateScene(selectedScene.id, {
+        ...updates,
+        duration_sec: updates.duration_sec,
+      });
       updateSceneInStore(selectedScene.id, {
         narration_text: updates.narration_text,
         on_screen_text_json: updates.on_screen_text,
+        ...(updates.duration_sec !== undefined && { duration_sec: updates.duration_sec }),
       });
     } catch (err) {
       console.error("Failed to save scene:", err);
@@ -100,6 +116,62 @@ export default function LessonEditorPage({
       console.error("Failed to regenerate scene:", err);
     } finally {
       setIsRegenerating(false);
+    }
+  }
+
+  async function handleRegenerateAssets() {
+    if (!selectedScene) return;
+    setIsRegeneratingAssets(true);
+    try {
+      await regenerateSceneAssets(selectedScene.id);
+      const updatedScenes = await getLessonScenes(lessonId);
+      setScenes(updatedScenes as unknown as Scene[]);
+    } catch (err) {
+      console.error("Failed to regenerate assets:", err);
+    } finally {
+      setIsRegeneratingAssets(false);
+    }
+  }
+
+  const handleToggleVeo = useCallback(async (enabled: boolean) => {
+    if (!selectedScene) return;
+    try {
+      await toggleSceneVeo(selectedScene.id, enabled);
+      const updatedScenes = await getLessonScenes(lessonId);
+      setScenes(updatedScenes as unknown as Scene[]);
+    } catch (err) {
+      console.error("Failed to toggle Veo:", err);
+    }
+  }, [selectedScene, lessonId, setScenes]);
+
+  async function handleMoveScene(direction: "up" | "down") {
+    if (!selectedScene) return;
+    const idx = scenes.findIndex((s) => s.id === selectedScene.id);
+    if (idx < 0) return;
+    const newIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (newIdx < 0 || newIdx >= scenes.length) return;
+
+    const newOrder = [...scenes];
+    [newOrder[idx], newOrder[newIdx]] = [newOrder[newIdx], newOrder[idx]];
+    const ids = newOrder.map((s) => s.id);
+
+    try {
+      const updated = await reorderScenes(lessonId, ids);
+      setScenes(updated as unknown as Scene[]);
+    } catch (err) {
+      console.error("Failed to reorder:", err);
+    }
+  }
+
+  async function handleStyleChange(preset: string) {
+    setIsChangingStyle(true);
+    try {
+      await updateLessonStyle(lessonId, preset);
+      setStylePreset(preset);
+    } catch (err) {
+      console.error("Failed to change style:", err);
+    } finally {
+      setIsChangingStyle(false);
     }
   }
 
@@ -138,9 +210,19 @@ export default function LessonEditorPage({
               <h1 className="text-lg font-semibold truncate max-w-xs">
                 {currentLesson?.title || "Untitled Lesson"}
               </h1>
-              <Badge variant="secondary">
-                {currentLesson?.style_preset?.replace(/_/g, " ")}
-              </Badge>
+              <div className="flex items-center gap-1.5">
+                <Palette className="h-3.5 w-3.5 text-muted-foreground" />
+                <select
+                  value={stylePreset}
+                  onChange={(e) => handleStyleChange(e.target.value)}
+                  disabled={isChangingStyle}
+                  className="text-xs border rounded px-2 py-1 bg-background"
+                >
+                  <option value="clean_academic">Clean Academic</option>
+                  <option value="modern_technical">Modern Technical</option>
+                  <option value="cinematic_minimal">Cinematic Minimal</option>
+                </select>
+              </div>
               <Badge variant="outline">{currentLesson?.status}</Badge>
             </div>
             <div className="flex items-center gap-2">
@@ -177,13 +259,36 @@ export default function LessonEditorPage({
                 Scenes ({scenes.length})
               </h2>
               <div className="space-y-2">
-                {scenes.map((scene) => (
-                  <SceneCard
-                    key={scene.id}
-                    scene={scene}
-                    isSelected={scene.id === selectedSceneId}
-                    onClick={() => selectScene(scene.id)}
-                  />
+                {scenes.map((scene, idx) => (
+                  <div key={scene.id} className="flex items-start gap-1">
+                    <div className="flex-1">
+                      <SceneCard
+                        scene={scene}
+                        isSelected={scene.id === selectedSceneId}
+                        onClick={() => selectScene(scene.id)}
+                      />
+                    </div>
+                    {scene.id === selectedSceneId && (
+                      <div className="flex flex-col gap-0.5 pt-2">
+                        <button
+                          onClick={() => handleMoveScene("up")}
+                          disabled={idx === 0}
+                          className="p-1 rounded hover:bg-muted disabled:opacity-30"
+                          title="Move up"
+                        >
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleMoveScene("down")}
+                          disabled={idx === scenes.length - 1}
+                          className="p-1 rounded hover:bg-muted disabled:opacity-30"
+                          title="Move down"
+                        >
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
@@ -216,6 +321,17 @@ export default function LessonEditorPage({
                       <span className="text-muted-foreground">Render Strategy</span>
                       <span>{selectedScene.render_strategy}</span>
                     </div>
+                    {!!(selectedScene.scene_spec_json?.veo_eligible) && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-muted-foreground flex items-center gap-1">
+                          <Clapperboard className="h-3.5 w-3.5" />
+                          Veo Motion
+                        </span>
+                        <Badge variant="default" className="bg-violet-600 text-white text-[10px]">
+                          Score {((selectedScene.scene_spec_json?.veo_score as number) ?? 0).toFixed(1)} — 5s clip
+                        </Badge>
+                      </div>
+                    )}
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Status</span>
                       <Badge
@@ -245,6 +361,36 @@ export default function LessonEditorPage({
                   </div>
                 </div>
               )}
+
+              {/* Gemini Live-ready interaction hooks */}
+              {selectedScene && (
+                <div className="mt-4 rounded-lg border bg-card p-4">
+                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+                    Interaction Hooks (Gemini Live-ready)
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { label: "Ask About This", icon: "💬" },
+                      { label: "Explain Simpler", icon: "🎯" },
+                      { label: "Show Flow Again", icon: "🔄" },
+                      { label: "Deeper Dive", icon: "🔍" },
+                      { label: "Quiz Me", icon: "❓" },
+                    ].map((hook) => (
+                      <button
+                        key={hook.label}
+                        className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-xs font-medium hover:bg-primary/5 hover:border-primary/30 transition-colors cursor-default"
+                        title={`Future: ${hook.label} for "${selectedScene.title}"`}
+                      >
+                        <span>{hook.icon}</span>
+                        {hook.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-[10px] text-muted-foreground/50">
+                    Scene metadata exposed via /scene-interactions API for future conversational AI
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -257,8 +403,11 @@ export default function LessonEditorPage({
                   scene={selectedScene}
                   onSave={handleSaveScene}
                   onRegenerate={handleRegenerateScene}
+                  onRegenerateAssets={handleRegenerateAssets}
+                  onToggleVeo={handleToggleVeo}
                   isSaving={isSaving}
                   isRegenerating={isRegenerating}
+                  isRegeneratingAssets={isRegeneratingAssets}
                 />
               ) : (
                 <div className="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">

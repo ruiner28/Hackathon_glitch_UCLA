@@ -21,7 +21,7 @@ async function request<T>(
   return res.json();
 }
 
-export async function uploadFile(lessonId: string, file: File) {
+export async function uploadFile(file: File): Promise<{ id: string; title: string }> {
   const formData = new FormData();
   formData.append("file", file);
 
@@ -35,6 +35,23 @@ export async function uploadFile(lessonId: string, file: File) {
   }
 
   return res.json();
+}
+
+export async function createLessonFromDocument(data: {
+  source_document_id: string;
+  topic: string;
+  domain: string;
+  style_preset: string;
+}) {
+  return request<{
+    id: string;
+    title: string;
+    domain: string;
+    status: string;
+  }>("/api/lessons", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
 }
 
 export async function createTopicLesson(data: {
@@ -137,6 +154,38 @@ export async function regenerateScene(sceneId: string) {
   });
 }
 
+export async function regenerateSceneAssets(sceneId: string) {
+  return request(`/api/scenes/${sceneId}/regenerate-assets`, {
+    method: "POST",
+  });
+}
+
+export async function reorderScenes(lessonId: string, sceneIds: string[]) {
+  return request(`/api/lessons/${lessonId}/reorder-scenes`, {
+    method: "POST",
+    body: JSON.stringify({ scene_ids: sceneIds }),
+  });
+}
+
+export async function updateLessonStyle(lessonId: string, stylePreset: string) {
+  return request<{
+    id: string;
+    title: string;
+    style_preset: string;
+    status: string;
+  }>(`/api/lessons/${lessonId}/style`, {
+    method: "PATCH",
+    body: JSON.stringify({ style_preset: stylePreset }),
+  });
+}
+
+export async function toggleSceneVeo(sceneId: string, veoEligible: boolean) {
+  return request(`/api/scenes/${sceneId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ veo_eligible: veoEligible }),
+  });
+}
+
 export async function triggerExtract(lessonId: string) {
   return request(`/api/lessons/${lessonId}/extract`, {
     method: "POST",
@@ -174,7 +223,14 @@ export async function triggerRenderFinal(lessonId: string) {
 }
 
 export async function triggerEvaluate(lessonId: string) {
-  return request(`/api/lessons/${lessonId}/evaluate`, {
+  return request<{
+    id: string;
+    lesson_id: string;
+    report_json: Record<string, unknown>;
+    score_overall: number;
+    flags_json: string[] | null;
+    created_at: string;
+  }>(`/api/lessons/${lessonId}/evaluate`, {
     method: "POST",
   });
 }
@@ -194,6 +250,8 @@ export async function getTranscript(lessonId: string) {
   return request<{
     full_text: string;
     total_duration_sec: number;
+    misconceptions: string[];
+    prerequisites: string[];
     scenes: Array<{
       scene_id: string;
       scene_order: number;
@@ -201,6 +259,9 @@ export async function getTranscript(lessonId: string) {
       text: string;
       timestamp: number;
       duration_sec: number;
+      scene_type: string;
+      learning_objective: string;
+      teaching_note: string;
     }>;
   }>(`/api/lessons/${lessonId}/transcript`);
 }
@@ -216,15 +277,80 @@ export async function getQuiz(lessonId: string) {
   }>(`/api/lessons/${lessonId}/quiz`);
 }
 
-export async function downloadLesson(lessonId: string) {
+export async function getSceneInteractions(lessonId: string) {
   return request<{
     lesson_id: string;
-    title: string;
-    status: string;
-    job_type: string;
-    rendered_at: string | null;
-    message: string;
-  }>(`/api/lessons/${lessonId}/download`);
+    scene_count: number;
+    total_duration_sec: number;
+    prerequisites: string[];
+    misconceptions: string[];
+    scenes: Array<{
+      scene_id: string;
+      scene_order: number;
+      title: string;
+      scene_type: string;
+      timestamp_sec: number;
+      duration_sec: number;
+      learning_objective: string;
+      teaching_note: string;
+      narration_summary: string;
+      interaction_hooks: Record<string, string>;
+    }>;
+  }>(`/api/lessons/${lessonId}/scene-interactions`);
+}
+
+export function getVideoUrl(lessonId: string): string {
+  return `${API_BASE}/api/lessons/${lessonId}/video`;
+}
+
+export function getSubtitlesUrl(lessonId: string): string {
+  return `${API_BASE}/api/lessons/${lessonId}/subtitles`;
+}
+
+export async function checkSubtitlesReady(lessonId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/api/lessons/${lessonId}/subtitles`, {
+      method: "HEAD",
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function checkVideoReady(lessonId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/api/lessons/${lessonId}/video`, {
+      method: "HEAD",
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function downloadLesson(lessonId: string) {
+  const url = `${API_BASE}/api/lessons/${lessonId}/download`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Download failed: ${res.status}`);
+  }
+
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("video/")) {
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = "lesson.mp4";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+    return { status: "downloaded" };
+  }
+
+  return res.json();
 }
 
 export async function runFullPipeline(lessonId: string) {

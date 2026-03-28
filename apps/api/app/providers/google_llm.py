@@ -1,9 +1,12 @@
+"""LLM provider backed by the Google Gemini API (google-genai SDK)."""
+
 import json
 import logging
 import re
 from typing import Any
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from app.core.config import get_settings
 from app.providers.base import LLMProvider
@@ -12,17 +15,21 @@ logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 2
 
+_SYSTEM_INSTRUCTION = (
+    "You are an expert computer-science educator and instructional designer. "
+    "Always respond with valid JSON matching the requested schema. "
+    "Do not include any text outside the JSON object."
+)
+
 
 def _extract_json(text: str) -> Any:
     """Extract JSON from an LLM response that may include markdown fences."""
-    # Try direct parse first
     text = text.strip()
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
 
-    # Strip markdown code fences
     match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     if match:
         try:
@@ -30,7 +37,6 @@ def _extract_json(text: str) -> Any:
         except json.JSONDecodeError:
             pass
 
-    # Last resort: find first { or [ and parse from there
     for start_char, end_char in [("{", "}"), ("[", "]")]:
         start = text.find(start_char)
         if start == -1:
@@ -46,34 +52,32 @@ def _extract_json(text: str) -> Any:
 
 
 class GeminiLLMProvider(LLMProvider):
-    """LLM provider backed by the Google Gemini API (google-generativeai SDK)."""
+    """LLM provider backed by the Google Gemini API (new google-genai SDK)."""
 
     def __init__(self) -> None:
         settings = get_settings()
-        genai.configure(api_key=settings.GEMINI_API_KEY)
+        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
         self.model_name = settings.GEMINI_MODEL
-        self.model = genai.GenerativeModel(
-            model_name=self.model_name,
-            system_instruction=(
-                "You are an expert computer-science educator and instructional designer. "
-                "Always respond with valid JSON matching the requested schema. "
-                "Do not include any text outside the JSON object."
-            ),
-        )
         logger.info("GeminiLLM: initialised with model=%s", self.model_name)
 
     async def _generate(self, prompt: str) -> str:
         last_err: Exception | None = None
         for attempt in range(1, _MAX_RETRIES + 2):
             try:
-                response = await self.model.generate_content_async(prompt)
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=_SYSTEM_INSTRUCTION,
+                    ),
+                )
                 return response.text
             except Exception as exc:
                 last_err = exc
                 logger.warning("GeminiLLM: attempt %d failed: %s", attempt, exc)
-        raise RuntimeError(f"Gemini API failed after {_MAX_RETRIES + 1} attempts") from last_err
-
-    # ------------------------------------------------------------------
+        raise RuntimeError(
+            f"Gemini API failed after {_MAX_RETRIES + 1} attempts"
+        ) from last_err
 
     async def extract_concepts(self, source_text: str, domain: str) -> dict:
         prompt = f"""Analyse the following source material about **{domain}** and extract a concept graph.
@@ -127,7 +131,9 @@ Style preference: {style}.
       "scene_type": "deterministic_animation | generated_still_with_motion | veo_cinematic | code_trace | system_design_graph | summary_scene",
       "duration_sec": number (15-45),
       "key_points": ["string", ...],
-      "visual_strategy": "string describing visuals"
+      "visual_strategy": "string describing visuals",
+      "narration": "Full narration for this section (2-4 sentences)",
+      "teaching_note": "string — pedagogical note for this section"
     }}
   ]
 }}
@@ -163,13 +169,17 @@ Create 6-8 sections with varied scene types. Return ONLY the JSON object."""
     "asset_requests": [
       {{"type": "image | video", "prompt": "string", "provider": "string"}}
     ],
-    "veo_prompt": "string or null",
-    "image_prompt": "string or null",
+    "veo_eligible": true/false,
+    "veo_prompt": "string or null (only if veo_eligible is true — describe the motion scene for Veo)",
+    "image_prompt": "string — detailed prompt for Nano Banana image generation describing the exact visual composition",
     "music_mood": "focused | dramatic | curious | uplifting | neutral",
+    "teaching_note": "string",
     "validation_notes": ""
   }}
 ]
 
+For image_prompt, be very specific about the visual composition: layout, components, arrows, labels, colors, style.
+For veo_prompt (if eligible), describe motion: what moves, direction, speed, visual style.
 Return ONLY the JSON array."""
         raw = await self._generate(prompt)
         return _extract_json(raw)

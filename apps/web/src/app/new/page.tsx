@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TopicSuggestions } from "@/components/lesson/topic-suggestions";
-import { createTopicLesson, uploadFile } from "@/lib/api";
+import { createTopicLesson, uploadFile, createLessonFromDocument } from "@/lib/api";
 import {
   Loader2,
   Upload,
@@ -128,17 +128,18 @@ function NewLessonContent() {
     if (!uploadedFile) return;
     setIsSubmitting(true);
     try {
-      const lesson = await createTopicLesson({
-        topic: uploadedFile.name.replace(/\.[^/.]+$/, ""),
-        domain: "cs_concepts",
+      const doc = await uploadFile(uploadedFile);
+      const paperTitle = doc.title || uploadedFile.name.replace(/\.[^/.]+$/, "");
+      const lesson = await createLessonFromDocument({
+        source_document_id: doc.id,
+        topic: paperTitle,
+        domain: "cs",
         style_preset: "clean_academic",
-        duration_seconds: 120,
-        music_enabled: true,
       });
-      await uploadFile(lesson.id, uploadedFile);
       router.push(`/processing/${lesson.id}`);
     } catch (err) {
       console.error("Failed to upload:", err);
+      setUploadError("Upload failed. Please try again.");
       setIsSubmitting(false);
     }
   }
@@ -202,7 +203,10 @@ function NewLessonContent() {
                       </div>
 
                       <TopicSuggestions
-                        onSelect={(topic) => setValue("topic", topic)}
+                        onSelect={(topic, domain) => {
+                          setValue("topic", topic);
+                          if (domain) setValue("domain", domain);
+                        }}
                         selectedTopic={currentTopic}
                       />
 
@@ -313,6 +317,14 @@ function NewLessonContent() {
 
                   {/* Upload Tab */}
                   <TabsContent value="upload" className="mt-6 space-y-6">
+                    <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3">
+                      <p className="text-sm text-blue-800 font-medium">Research Paper & Slides Flow</p>
+                      <p className="text-xs text-blue-600 mt-1">
+                        Upload a PDF paper or PPTX slides. We&apos;ll parse sections, simplify key ideas,
+                        and generate a visual walkthrough with narrated explanations.
+                      </p>
+                    </div>
+
                     {!uploadedFile ? (
                       <div
                         {...getRootProps()}
@@ -327,7 +339,7 @@ function NewLessonContent() {
                         <p className="text-sm font-medium">
                           {isDragActive
                             ? "Drop your file here"
-                            : "Drag & drop your file here"}
+                            : "Drag & drop your paper or slides"}
                         </p>
                         <p className="mt-1 text-xs text-muted-foreground">
                           PDF or PPTX up to 50MB
@@ -349,7 +361,8 @@ function NewLessonContent() {
                             {uploadedFile.name}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {formatBytes(uploadedFile.size)}
+                            {formatBytes(uploadedFile.size)} &middot;{" "}
+                            {uploadedFile.type.includes("pdf") ? "PDF Document" : "PowerPoint"}
                           </p>
                         </div>
                         <Button
@@ -375,12 +388,12 @@ function NewLessonContent() {
                       {isSubmitting ? (
                         <>
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Uploading & Creating...
+                          Uploading & Parsing...
                         </>
                       ) : (
                         <>
                           <Sparkles className="mr-2 h-4 w-4" />
-                          Generate Lesson
+                          Generate Visual Walkthrough
                         </>
                       )}
                     </Button>
