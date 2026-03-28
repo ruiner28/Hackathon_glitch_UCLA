@@ -17,7 +17,11 @@ class LessonSceneType(str, Enum):
 
 SCENE_LAYOUT_HINTS: dict[str, str] = {
     "veo_cinematic": "Hero composition, single focal metaphor, strong horizon line, motion-ready negative space",
-    "system_design_graph": "Left-to-right tiered boxes (client → gateway → services → data), numbered arrows, legend bottom-right",
+    "system_design_graph": (
+        "Professional system diagram: left-to-right swimlanes (client → gateway / edge → core services → datastore). "
+        "Use tiered boxes with icons, numbered arrows, color-coded success vs failure paths where relevant, "
+        "legend or key bottom-right, generous whitespace, no clutter."
+    ),
     "deterministic_animation": "Centered diagram with 3–5 labeled regions, step numbers, clear vertical or horizontal flow",
     "code_trace": "Split panel: pseudocode left, state table or stack visualization right",
     "generated_still_with_motion": "Single clear story beat, arrows showing direction of flow, one emphasis halo",

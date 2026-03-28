@@ -29,8 +29,9 @@ class NanoBananaImageProvider(ImageProvider):
         enhanced_prompt = (
             f"{prompt}. "
             f"Style: {style.replace('_', ' ')}. "
-            f"Premium educational diagram: deep slate or soft white field, high contrast, "
-            f"generous whitespace, crisp vector-like edges, no blurry text, no watermarks."
+            f"Premium reference-grade technical diagram: clear hierarchy, labeled arrows, "
+            f"consistent iconography, high contrast, generous whitespace, crisp vector-like edges, "
+            f"readable typography, no blurry text, no watermarks, no photorealistic faces."
         )
 
         logger.info("NanoBanana: generating image, prompt=%s", prompt[:100])
