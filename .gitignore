@@ -16,5 +16,7 @@ generated/
 *.mp3
 .DS_Store
 
-# Local FastAPI storage (generated assets, renders, outputs); tracked files stay tracked
+# Generated lesson assets & local API storage
+storage/
 apps/api/storage/
+apps/api/*.db

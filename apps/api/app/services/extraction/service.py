@@ -42,6 +42,14 @@ class ExtractionService:
             rest = source_text[idx:].split(".")[0].strip()
             if rest:
                 title = rest
+        if title == domain and "about:" in source_text.lower():
+            lower = source_text.lower()
+            key = "about:"
+            pos = lower.index(key) + len(key)
+            tail = source_text[pos:].lstrip(" :\t")
+            topic_part = tail.split(".")[0].strip()
+            if topic_part:
+                title = topic_part
 
         result = {
             "title": title,

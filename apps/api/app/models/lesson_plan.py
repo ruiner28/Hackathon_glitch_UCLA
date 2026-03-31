@@ -23,6 +23,8 @@ class LessonPlan(Base):
     misconceptions_json = Column(JSON, nullable=True, default=list)
     lesson_objectives_json = Column(JSON, nullable=True, default=list)
     plan_json = Column(JSON, nullable=True, default=dict)
+    diagram_spec_json = Column(JSON, nullable=True)
+    walkthrough_states_json = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     lesson = relationship("Lesson", back_populates="lesson_plan")

@@ -377,8 +377,9 @@ export default function OutputPage({
                       Video Not Yet Generated
                     </p>
                     <p className="mt-1 text-sm text-white/40 max-w-sm">
-                      Click &quot;Render Final&quot; from the editor to generate
-                      the video.
+                      From the lesson page, use &quot;Generate Animation&quot;
+                      (diagram lessons) or &quot;Render Video&quot; to create the
+                      MP4.
                     </p>
                   </div>
                 </div>

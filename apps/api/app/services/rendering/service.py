@@ -1044,73 +1044,46 @@ def _normalize_clip(input_path: str, output_path: str) -> bool:
         "-an",
         output_path,
     ]
-    r = subprocess.run(cmd, capture_output=True, timeout=30)
-    return r.returncode == 0 and os.path.exists(output_path)
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=60)
+        return r.returncode == 0 and os.path.exists(output_path)
+    except subprocess.TimeoutExpired:
+        logger.warning("normalize_clip timed out for %s", input_path)
+        return False
 
 
-KEN_BURNS_FPS = 25
-
-
-def _image_to_mp4_static_concat(
+def _image_to_mp4(
     img_path: str,
     duration_sec: float,
     out_path: str,
-    tmpdir: str,
-    idx: int,
+    idx: int = 0,
 ) -> bool:
-    """Fallback: single frozen frame for duration (legacy slideshow)."""
-    still_concat = os.path.join(tmpdir, f"still_list_fb_{idx:03d}.txt")
-    with open(still_concat, "w") as f:
-        f.write(f"file '{img_path}'\n")
-        f.write(f"duration {duration_sec}\n")
-        f.write(f"file '{img_path}'\n")
-    cmd_still = [
+    """Convert a still image to a fixed-duration MP4 (no zoompan — fast)."""
+    dur = max(0.1, duration_sec)
+    cmd = [
         "ffmpeg", "-y",
-        "-f", "concat", "-safe", "0", "-i", still_concat,
-        "-vf", f"scale={WIDTH}:{HEIGHT},format=yuv420p",
+        "-loop", "1", "-framerate", "1",
+        "-i", img_path,
+        "-t", f"{dur:.2f}",
+        "-vf", f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,"
+               f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
         "-pix_fmt", "yuv420p",
-        out_path,
-    ]
-    timeout = max(30, min(300, int(duration_sec) + 40))
-    r = subprocess.run(cmd_still, capture_output=True, timeout=timeout)
-    return r.returncode == 0 and os.path.exists(out_path)
-
-
-def _image_to_mp4_ken_burns(
-    img_path: str,
-    duration_sec: float,
-    out_path: str,
-    motion_index: int,
-) -> bool:
-    """
-    Slow zoom in/out on a still image so long narration segments feel less static.
-    Alternates zoom-in vs zoom-out by segment index.
-    """
-    frames = max(3, min(int(duration_sec * KEN_BURNS_FPS), 9000))
-    if motion_index % 2 == 0:
-        z_expr = f"1+0.10*on/{frames}"
-    else:
-        z_expr = f"1.10-0.10*on/{frames}"
-    vf = (
-        f"zoompan=z='{z_expr}':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-        f"s={WIDTH}x{HEIGHT}:fps={KEN_BURNS_FPS}"
-    )
-    cmd = [
-        "ffmpeg", "-y", "-loop", "1", "-i", img_path,
-        "-vf", vf,
-        "-c:v", "libx264", "-preset", "medium", "-crf", "23",
-        "-pix_fmt", "yuv420p",
+        "-r", "25",
         "-an",
         out_path,
     ]
-    timeout = max(45, min(int(frames / KEN_BURNS_FPS) + 60, 600))
-    r = subprocess.run(cmd, capture_output=True, timeout=timeout)
-    if r.returncode != 0 or not os.path.exists(out_path):
-        err = (r.stderr or b"").decode(errors="replace")[:500]
-        logger.warning("Ken Burns encode failed (will try static fallback): %s", err)
+    timeout = max(30, int(dur) + 30)
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=timeout)
+        if r.returncode == 0 and os.path.exists(out_path):
+            return True
+        err = (r.stderr or b"").decode(errors="replace")[:300]
+        logger.warning("image_to_mp4 failed idx=%d rc=%d: %s", idx, r.returncode, err)
         return False
-    return True
+    except subprocess.TimeoutExpired:
+        logger.warning("image_to_mp4 timed out idx=%d after %ds", idx, timeout)
+        return False
 
 
 def _compose_video_ffmpeg(
@@ -1143,11 +1116,8 @@ def _compose_video_ffmpeg(
                 if ad > 0.5:
                     effective_durations[i] = max(ad + 0.5, durations[i])
 
-        # Build segments — each scene may become two entries:
-        # (1) veo clip  (2) remaining static frame (Ken Burns on still)
         segment_files: list[str] = []
-        ken_burns_ok = 0
-        ken_burns_fb = 0
+        ok_count = 0
         for idx, (img_path, dur) in enumerate(zip(image_paths, effective_durations)):
             veo_clip = clips[idx] if idx < len(clips) else ""
 
@@ -1161,17 +1131,12 @@ def _compose_video_ffmpeg(
             else:
                 remaining = dur
 
-            # Static segment: Ken Burns zoom on still, then frozen fallback
             still_mp4 = os.path.join(tmpdir, f"still_{idx:03d}.mp4")
             if remaining > 0.02 and os.path.exists(img_path):
-                if _image_to_mp4_ken_burns(img_path, remaining, still_mp4, idx):
-                    ken_burns_ok += 1
-                elif _image_to_mp4_static_concat(
-                    img_path, remaining, still_mp4, tmpdir, idx,
-                ):
-                    ken_burns_fb += 1
+                if _image_to_mp4(img_path, remaining, still_mp4, idx):
+                    ok_count += 1
                 else:
-                    logger.warning("Could not encode static segment idx=%d", idx)
+                    logger.warning("Could not encode segment idx=%d", idx)
             if os.path.exists(still_mp4):
                 segment_files.append(still_mp4)
 
@@ -1179,10 +1144,9 @@ def _compose_video_ffmpeg(
             return False
 
         logger.info(
-            "Compose: Ken Burns stills=%d, frozen fallback=%d, segments=%d",
-            ken_burns_ok,
-            ken_burns_fb,
-            len(segment_files),
+            "Compose: encoded %d segments out of %d images",
+            ok_count,
+            len(image_paths),
         )
 
         # Concatenate all video segments

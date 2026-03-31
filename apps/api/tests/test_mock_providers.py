@@ -47,6 +47,22 @@ class TestMockLLMProvider:
         assert len(plan["sections"]) >= 5
 
     @pytest.mark.asyncio
+    async def test_create_lesson_plan_rate_limiter_when_domain_is_cs(self):
+        """Homepage prefills topic but form often sends domain=cs; plan must still use curated rate-limit content."""
+        source = (
+            "Create a comprehensive educational lesson about: Rate Limiter. "
+            "Domain: cs. Cover all key concepts."
+        )
+        raw = await self.llm.extract_concepts(source, "cs")
+        concepts = {
+            "title": "cs",
+            "concept_graph": {"nodes": raw["nodes"], "edges": raw["edges"]},
+        }
+        plan = await self.llm.create_lesson_plan(concepts, "cs", "clean_academic")
+        assert plan.get("lesson_title") == "Rate Limiter System Design"
+        assert len(plan.get("sections", [])) >= 5
+
+    @pytest.mark.asyncio
     async def test_compile_scenes(self):
         plan = await self.llm.create_lesson_plan({}, "deadlock", "clean_academic")
         scenes = await self.llm.compile_scenes(plan, "cs")
