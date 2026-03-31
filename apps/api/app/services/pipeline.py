@@ -43,6 +43,7 @@ from app.services.narration.service import NarrationService
 from app.services.planning.service import PlanningService
 from app.services.rendering.service import RenderingService
 from app.services.veo_render.service import VeoRenderService
+from app.services.veo_stitched_folder import list_stitchable_videos, stitch_videos_to_path
 from app.services.visual_system.nano_banana_prompt import enrich_image_prompt_from_scene_spec
 
 logger = logging.getLogger(__name__)
@@ -1189,7 +1190,28 @@ class LessonPipeline:
                 "Pipeline.run_veo_render: reused existing lesson.mp4 (VEO_REUSE_EXISTING_OUTPUT) lesson=%s",
                 lesson.id,
             )
-        elif settings.VEO_OFFLINE_USE_DEMO_CACHE:
+        elif settings.VEO_USE_STITCHED_FOLDER:
+            veo_root = (
+                Path(settings.LOCAL_STORAGE_PATH).resolve() / settings.VEO_VIDEOS_DIR
+            )
+            sources = list_stitchable_videos(veo_root)
+            if sources:
+                stitched_ok = await asyncio.to_thread(
+                    stitch_videos_to_path, sources, out_mp4
+                )
+                if stitched_ok:
+                    video_url = await self.storage.put_file(
+                        f"output/{lesson.id}/lesson.mp4",
+                        out_mp4.read_bytes(),
+                        "video/mp4",
+                    )
+                    logger.info(
+                        "Pipeline.run_veo_render: stitched %d clip(s) from %s lesson=%s",
+                        len(sources),
+                        veo_root,
+                        lesson.id,
+                    )
+        if not video_url and settings.VEO_OFFLINE_USE_DEMO_CACHE:
             slug = demo_cache_service.resolve_demo_cache_slug(lesson.input_topic)
             cached = (
                 demo_cache_service.cached_final_video_path(slug) if slug else None

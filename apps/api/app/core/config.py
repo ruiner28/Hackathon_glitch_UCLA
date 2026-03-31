@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     VEO_OFFLINE_USE_DEMO_CACHE: bool = True
     # If true and storage/output/{lessonId}/lesson.mp4 already exists, reuse it (no Veo).
     VEO_REUSE_EXISTING_OUTPUT: bool = False
+    # Stitch MP4s under LOCAL_STORAGE_PATH/VEO_VIDEOS_DIR (e.g. video 1.mp4 … video 3.mp4) for Generate Animation.
+    VEO_USE_STITCHED_FOLDER: bool = True
+    VEO_VIDEOS_DIR: str = "VeoVideos"
 
     GCS_BUCKET_NAME: str = ""
     GOOGLE_PROJECT_ID: str = ""
