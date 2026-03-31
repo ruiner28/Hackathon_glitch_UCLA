@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 
 from app.core.config import get_settings
@@ -47,6 +48,44 @@ def _strip_markdown_fences(text: str) -> str:
     return t.strip()
 
 
+def _strip_stray_prose_lines(text: str) -> str:
+    """Remove lines that are clearly not JSON (models sometimes insert English sentences mid-object)."""
+    out: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            out.append(line)
+            continue
+        if stripped.startswith("//") or stripped.startswith("#"):
+            continue
+        if stripped in ("true", "false", "null"):
+            out.append(line)
+            continue
+        if any(c in line for c in "\"{}[]"):
+            out.append(line)
+            continue
+        if re.match(r"^-?\d", stripped):
+            out.append(line)
+            continue
+        if stripped in (",", "{", "}", "[", "]"):
+            out.append(line)
+            continue
+        # JSON keys always start with a double quote; prose often starts with a letter
+        if re.match(r"^[A-Za-z_]", stripped):
+            logger.info(
+                "Stripping stray prose line from LLM JSON: %s",
+                stripped[:120],
+            )
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def _sanitize_json_text(text: str) -> str:
+    """Best-effort cleanup before json.loads (prose, fences already handled elsewhere)."""
+    return _strip_stray_prose_lines(text)
+
+
 def _balanced_json_slice(text: str, start: int, open_ch: str, close_ch: str) -> str | None:
     """Return substring from first balanced {…} or […] starting at *start*."""
     depth = 0
@@ -84,17 +123,22 @@ def _try_parse(text: str) -> Any | None:
 
 def _extract_json(text: str) -> Any:
     """Extract JSON from an LLM response, tolerating fences, artifacts, and trailing junk."""
-    cleaned = _clean_gemini_artifacts(text).strip()
+    cleaned = _sanitize_json_text(_clean_gemini_artifacts(text).strip())
 
     for variant in dict.fromkeys([cleaned, _strip_markdown_fences(cleaned)]):
         result = _try_parse(variant)
+        if result is not None:
+            return result
+        # Second pass: strip prose again after fence removal (different line breaks)
+        result = _try_parse(_sanitize_json_text(variant))
         if result is not None:
             return result
 
     # Full fenced block (both delimiters present)
     match = re.search(r"```(?:json)?\s*([\s\S]*?)```", cleaned, re.IGNORECASE)
     if match:
-        result = _try_parse(match.group(1).strip())
+        inner = _sanitize_json_text(match.group(1).strip())
+        result = _try_parse(inner)
         if result is not None:
             return result
 
@@ -105,12 +149,14 @@ def _extract_json(text: str) -> Any:
             continue
         balanced = _balanced_json_slice(cleaned, start, open_ch, close_ch)
         if balanced:
-            result = _try_parse(balanced)
+            result = _try_parse(_sanitize_json_text(balanced))
             if result is not None:
                 return result
         end = cleaned.rfind(close_ch)
         if end > start:
-            result = _try_parse(cleaned[start : end + 1])
+            result = _try_parse(
+                _sanitize_json_text(cleaned[start : end + 1]),
+            )
             if result is not None:
                 return result
 
@@ -132,10 +178,27 @@ def _as_concept_dict(parsed: Any) -> dict:
 
 
 def _as_lesson_plan_dict(parsed: Any) -> dict:
+    """Normalize Gemini JSON: model sometimes returns a bare ``sections`` array or ``[{plan}]``."""
     if isinstance(parsed, dict):
         return parsed
+    if isinstance(parsed, list):
+        if (
+            len(parsed) == 1
+            and isinstance(parsed[0], dict)
+            and (
+                "sections" in parsed[0]
+                or "lesson_title" in parsed[0]
+                or "objectives" in parsed[0]
+            )
+        ):
+            return parsed[0]
+        # Bare array of section objects (matches schema for ``sections`` only).
+        logger.info(
+            "Gemini lesson plan returned a JSON array; normalized to plan['sections']."
+        )
+        return {"sections": parsed}
     raise ValueError(
-        f"Gemini lesson plan returned {type(parsed).__name__}; expected a JSON object"
+        f"Gemini lesson plan returned {type(parsed).__name__}; expected a JSON object or array"
     )
 
 
@@ -154,6 +217,28 @@ def _as_scene_list(parsed: Any) -> list[dict]:
     )
 
 
+def _is_gemini_api_key_rejected(exc: BaseException) -> bool:
+    """True when Google returns invalid/missing API key (no point retrying)."""
+    msg = str(exc).lower()
+    if "api_key_invalid" in msg or "api key not valid" in msg:
+        return True
+    if isinstance(exc, genai_errors.ClientError):
+        details = getattr(exc, "details", None)
+        blob = json.dumps(details, default=str) if details is not None else ""
+        if "API_KEY_INVALID" in blob or "api key not valid" in blob.lower():
+            return True
+    return False
+
+
+_GEMINI_KEY_HELP = (
+    "If the key is loaded but Google still says API_KEY_INVALID, open Google Cloud Console → "
+    "APIs & Services → Credentials → your API key → set API restrictions to 'Don't restrict key' "
+    "(for testing) or explicitly allow 'Generative Language API'. Enable the Generative Language API "
+    "for the project. New key: https://aistudio.google.com/apikey — Shell env overrides .env: "
+    "`unset GEMINI_API_KEY`. For local dev without Google: LLM_PROVIDER=mock."
+)
+
+
 class GeminiLLMProvider(LLMProvider):
     """LLM provider backed by the Google Gemini API (new google-genai SDK)."""
 
@@ -166,7 +251,12 @@ class GeminiLLMProvider(LLMProvider):
             )
         self.client = genai.Client(api_key=key)
         self.model_name = settings.GEMINI_MODEL
-        logger.info("GeminiLLM: initialised with model=%s", self.model_name)
+        logger.info(
+            "GeminiLLM: model=%s api_key_len=%s prefix=%s",
+            self.model_name,
+            len(key),
+            key[:4] if len(key) >= 4 else "????",
+        )
 
     def _response_text(self, response: Any) -> str:
         text = getattr(response, "text", None)
@@ -182,11 +272,15 @@ class GeminiLLMProvider(LLMProvider):
             f"Model={self.model_name!r}. Snippet: {snippet}"
         )
 
-    async def _generate(self, prompt: str) -> str:
-        config = types.GenerateContentConfig(
-            system_instruction=_SYSTEM_INSTRUCTION,
-            max_output_tokens=_MAX_OUTPUT_TOKENS,
-        )
+    async def _generate(self, prompt: str, *, json_response: bool = False) -> str:
+        """When *json_response* is True, ask Gemini for strict JSON (reduces stray prose)."""
+        config_kw: dict[str, Any] = {
+            "system_instruction": _SYSTEM_INSTRUCTION,
+            "max_output_tokens": _MAX_OUTPUT_TOKENS,
+        }
+        if json_response:
+            config_kw["response_mime_type"] = "application/json"
+        config = types.GenerateContentConfig(**config_kw)
         last_err: Exception | None = None
         for attempt in range(1, _MAX_RETRIES + 2):
             try:
@@ -197,6 +291,10 @@ class GeminiLLMProvider(LLMProvider):
                 )
                 return self._response_text(response)
             except Exception as exc:
+                if _is_gemini_api_key_rejected(exc):
+                    raise RuntimeError(
+                        f"Gemini API key was rejected by Google. {_GEMINI_KEY_HELP}"
+                    ) from exc
                 last_err = exc
                 logger.warning("GeminiLLM: attempt %d failed: %s", attempt, exc)
         raise RuntimeError(
@@ -231,9 +329,10 @@ class GeminiLLMProvider(LLMProvider):
 
 Constraints:
 - At most 12 nodes and 24 edges; keep each description under 120 characters.
+- Never insert comments, notes, or English sentences inside the JSON. Every line must be valid JSON syntax.
 
 Return ONLY the JSON object."""
-        raw = await self._generate(prompt)
+        raw = await self._generate(prompt, json_response=True)
         return _as_concept_dict(_extract_json(raw))
 
     async def create_lesson_plan(self, concepts: dict, domain: str, style: str) -> dict:
@@ -265,8 +364,8 @@ Style preference: {style}.
   ]
 }}
 
-Create 6-8 sections with varied scene types. Return ONLY the JSON object."""
-        raw = await self._generate(prompt)
+Create 6-8 sections with varied scene types. Return ONLY one JSON object whose top-level keys include lesson_title and sections. Do not return a bare JSON array. Do not add comments or prose inside the JSON."""
+        raw = await self._generate(prompt, json_response=True)
         return _as_lesson_plan_dict(_extract_json(raw))
 
     async def compile_scenes(self, lesson_plan: dict, domain: str) -> list[dict]:
@@ -316,8 +415,8 @@ Rules:
 - image_prompt: diagram-style clarity — grid, margins, callouts, consistent palette; educational first.
 - veo_prompt: only for dynamic scenes (flows, counters, queues); keep duration implied short (3-5s); static recap/summary → veo_eligible false, render_mode force_static.
 - Narration should reference on_screen_text and feel continuous across scenes.
-Return ONLY the JSON array."""
-        raw = await self._generate(prompt)
+Return ONLY the JSON array. Do not add comments or prose inside the JSON."""
+        raw = await self._generate(prompt, json_response=True)
         return _as_scene_list(_extract_json(raw))
 
     async def write_narration(self, scene_spec: dict) -> str:
@@ -354,8 +453,8 @@ Return ONLY the narration text as a plain string (no JSON wrapping)."""
   }}
 ]
 
-Make questions test understanding, not recall. Return ONLY the JSON array."""
-        raw = await self._generate(prompt)
+Make questions test understanding, not recall. Return ONLY the JSON array. Do not add comments or prose inside the JSON."""
+        raw = await self._generate(prompt, json_response=True)
         return _extract_json(raw)
 
     async def evaluate_lesson(self, lesson_data: dict) -> dict:
@@ -377,6 +476,6 @@ Make questions test understanding, not recall. Return ONLY the JSON array."""
 }}
 
 Be constructive. Scores should be in the 0.7-0.95 range for a well-made lesson.
-Return ONLY the JSON object."""
-        raw = await self._generate(prompt)
+Return ONLY the JSON object. Do not add comments or prose inside the JSON."""
+        raw = await self._generate(prompt, json_response=True)
         return _extract_json(raw)

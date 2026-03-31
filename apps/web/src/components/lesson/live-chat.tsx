@@ -1,17 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { cn } from "@/lib/utils";
 import { getLiveWebSocketUrl } from "@/lib/api";
 import {
-  Mic,
-  MicOff,
-  X,
-  MessageCircle,
-  Volume2,
+  GeminiLiveOrb,
+  mapToOrbState,
+} from "@/components/lesson/gemini-live-orb";
+import {
+  AlertCircle,
+  AudioLines,
+  Brain,
   ChevronLeft,
   ChevronRight,
-  BookOpen,
+  Loader2,
+  Mic,
+  MicOff,
+  Sparkles,
+  Volume2,
 } from "lucide-react";
 import type { WalkthroughState } from "@/lib/api";
 
@@ -25,6 +37,8 @@ interface LiveChatProps {
   lessonId: string;
   currentStateId?: string;
   className?: string;
+  /** When embedded in the diagram, the orb stays with the canvas (and fullscreen). */
+  placement?: "diagram" | "viewport";
   walkthroughStates?: WalkthroughState[];
   currentWalkthroughIndex?: number;
   onAdvanceState?: (index: number) => void;
@@ -76,18 +90,18 @@ function downsampleBuffer(
 
 export function LiveChat({
   lessonId,
-  currentStateId,
+  currentStateId: _unusedCurrentStateId,
   className,
+  placement = "diagram",
   walkthroughStates,
   currentWalkthroughIndex,
   onAdvanceState,
   componentQuestion,
 }: LiveChatProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  void _unusedCurrentStateId;
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("idle");
   const [speakingState, setSpeakingState] = useState<SpeakingState>("idle");
-  const [guidedMode, setGuidedMode] = useState(false);
   const guidedPendingRef = useRef(false);
   const sendNarrateStateRef = useRef<(idx: number) => void>(() => {});
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
@@ -98,10 +112,12 @@ export function LiveChat({
   const streamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const muteGainRef = useRef<GainNode | null>(null);
   const isPlayingRef = useRef(false);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
   const nextPlayTimeRef = useRef(0);
   const micGateRef = useRef(false);
+  const liveSessionRef = useRef(0);
 
   const scrollToBottom = useCallback(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -171,6 +187,10 @@ export function LiveChat({
       processorRef.current.disconnect();
       processorRef.current = null;
     }
+    if (muteGainRef.current) {
+      muteGainRef.current.disconnect();
+      muteGainRef.current = null;
+    }
     if (sourceRef.current) {
       sourceRef.current.disconnect();
       sourceRef.current = null;
@@ -182,11 +202,14 @@ export function LiveChat({
   }, []);
 
   const disconnect = useCallback(() => {
+    liveSessionRef.current += 1;
     stopMic();
     if (wsRef.current) {
       try {
         wsRef.current.send(JSON.stringify({ type: "end" }));
-      } catch {}
+      } catch {
+        /* ignore */
+      }
       wsRef.current.close();
       wsRef.current = null;
     }
@@ -202,6 +225,7 @@ export function LiveChat({
   }, [stopMic]);
 
   const connect = useCallback(async () => {
+    const sessionId = ++liveSessionRef.current;
     setError(null);
     setConnectionState("connecting");
     setTranscript([]);
@@ -215,9 +239,19 @@ export function LiveChat({
           autoGainControl: true,
         },
       });
+      if (sessionId !== liveSessionRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       streamRef.current = stream;
 
       const audioCtx = new AudioContext();
+      if (sessionId !== liveSessionRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        audioCtx.close().catch(() => {});
+        return;
+      }
       audioContextRef.current = audioCtx;
       const nativeRate = audioCtx.sampleRate;
 
@@ -226,13 +260,21 @@ export function LiveChat({
       wsRef.current = ws;
 
       ws.onopen = () => {
+        if (sessionId !== liveSessionRef.current) return;
+        const ctx = audioContextRef.current;
+        if (!ctx || ctx.state === "closed") return;
+
         setConnectionState("connected");
 
-        const source = audioCtx.createMediaStreamSource(stream);
+        const source = ctx.createMediaStreamSource(stream);
         sourceRef.current = source;
 
-        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+        const processor = ctx.createScriptProcessor(4096, 1, 1);
         processorRef.current = processor;
+
+        const muteGain = ctx.createGain();
+        muteGain.gain.value = 0;
+        muteGainRef.current = muteGain;
 
         processor.onaudioprocess = (e: AudioProcessingEvent) => {
           if (ws.readyState !== WebSocket.OPEN) return;
@@ -247,7 +289,8 @@ export function LiveChat({
         };
 
         source.connect(processor);
-        processor.connect(audioCtx.destination);
+        processor.connect(muteGain);
+        muteGain.connect(ctx.destination);
       };
 
       ws.onmessage = (event) => {
@@ -336,7 +379,9 @@ export function LiveChat({
             case "connected":
               break;
           }
-        } catch {}
+        } catch {
+          /* ignore malformed */
+        }
       };
 
       ws.onerror = () => {
@@ -370,68 +415,7 @@ export function LiveChat({
     };
   }, [disconnect]);
 
-  const lastComponentQuestionTs = useRef(0);
-
-  useEffect(() => {
-    if (!componentQuestion || componentQuestion.timestamp <= lastComponentQuestionTs.current)
-      return;
-    lastComponentQuestionTs.current = componentQuestion.timestamp;
-
-    setIsOpen(true);
-
-    const question = `Tell me about the "${componentQuestion.label}" component — what role does it play and how does it work?`;
-
-    if (connectionState === "connected") {
-      sendTextMessage(question);
-    } else if (connectionState === "idle" || connectionState === "error") {
-      const origConnect = connect;
-      (async () => {
-        await origConnect();
-        const waitForReady = () =>
-          new Promise<void>((resolve) => {
-            const check = setInterval(() => {
-              if (wsRef.current?.readyState === WebSocket.OPEN) {
-                clearInterval(check);
-                resolve();
-              }
-            }, 100);
-            setTimeout(() => {
-              clearInterval(check);
-              resolve();
-            }, 5000);
-          });
-        await waitForReady();
-        setTimeout(() => {
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ type: "text", text: question }));
-            setTranscript((prev) => [
-              ...prev,
-              { role: "user", text: question, timestamp: Date.now() },
-            ]);
-            setSpeakingState("thinking");
-          }
-        }, 500);
-      })();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [componentQuestion]);
-
-  const handleToggle = () => {
-    if (isOpen && connectionState === "connected") {
-      disconnect();
-    }
-    setIsOpen((o) => !o);
-  };
-
-  const handleConnect = () => {
-    if (connectionState === "connected") {
-      disconnect();
-    } else {
-      connect();
-    }
-  };
-
-  const sendTextMessage = (text: string) => {
+  const sendTextMessage = useCallback((text: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       micGateRef.current = false;
       wsRef.current.send(JSON.stringify({ type: "text", text }));
@@ -441,7 +425,7 @@ export function LiveChat({
       ]);
       setSpeakingState("thinking");
     }
-  };
+  }, []);
 
   const sendNarrateState = useCallback(
     (stateIdx: number) => {
@@ -482,7 +466,6 @@ export function LiveChat({
 
   const startGuidedTour = useCallback(async () => {
     if (!walkthroughStates?.length) return;
-    setGuidedMode(true);
     guidedPendingRef.current = true;
     onAdvanceState?.(0);
 
@@ -521,122 +504,333 @@ export function LiveChat({
     sendNarrateState(prev);
   };
 
-  const stateColors: Record<SpeakingState, string> = {
-    idle: "bg-slate-400",
-    listening: "bg-green-500",
-    thinking: "bg-yellow-500",
-    speaking: "bg-blue-500",
+  const lastComponentQuestionTs = useRef(0);
+
+  useEffect(() => {
+    if (
+      !componentQuestion ||
+      componentQuestion.timestamp <= lastComponentQuestionTs.current
+    )
+      return;
+    lastComponentQuestionTs.current = componentQuestion.timestamp;
+
+    const question = `Tell me about the "${componentQuestion.label}" component — what role does it play and how does it work?`;
+
+    if (connectionState === "connected") {
+      sendTextMessage(question);
+    } else if (connectionState === "idle" || connectionState === "error") {
+      const origConnect = connect;
+      (async () => {
+        if (walkthroughStates?.length) {
+          await startGuidedTour();
+        } else {
+          await origConnect();
+        }
+        const waitForReady = () =>
+          new Promise<void>((resolve) => {
+            const check = setInterval(() => {
+              if (wsRef.current?.readyState === WebSocket.OPEN) {
+                clearInterval(check);
+                resolve();
+              }
+            }, 100);
+            setTimeout(() => {
+              clearInterval(check);
+              resolve();
+            }, 5000);
+          });
+        await waitForReady();
+        setTimeout(() => {
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: "text", text: question }));
+            setTranscript((prev) => [
+              ...prev,
+              { role: "user", text: question, timestamp: Date.now() },
+            ]);
+            setSpeakingState("thinking");
+          }
+        }, 500);
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [componentQuestion]);
+
+  const handleOrbClick = () => {
+    if (connectionState === "connected") {
+      disconnect();
+    } else if (connectionState !== "connecting") {
+      if (walkthroughStates?.length) {
+        void startGuidedTour();
+      } else {
+        void connect();
+      }
+    }
   };
 
-  const stateLabels: Record<SpeakingState, string> = {
-    idle: "Not connected",
-    listening: "Listening...",
-    thinking: "Reconnecting...",
-    speaking: "Speaking...",
-  };
+  const statusUi = (() => {
+    if (connectionState === "connecting") {
+      return {
+        icon: <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2.5} />,
+        title: "Connecting",
+        subtitle: "Session & microphone",
+        pill: "border-amber-200/90 bg-gradient-to-br from-amber-50 via-white to-orange-50/90 text-amber-950 shadow-md shadow-amber-100/40",
+        iconWrap: "bg-amber-100 text-amber-700 ring-2 ring-amber-300/40",
+        activity: null as ReactNode,
+      };
+    }
+    if (connectionState === "error") {
+      return {
+        icon: <AlertCircle className="h-3.5 w-3.5" strokeWidth={2.5} />,
+        title: "Connection issue",
+        subtitle: "Check API or try again",
+        pill: "border-red-200/90 bg-gradient-to-br from-red-50 to-rose-50/95 text-red-900 shadow-md shadow-red-100/30",
+        iconWrap: "bg-red-100 text-red-700 ring-2 ring-red-300/35",
+        activity: null as ReactNode,
+      };
+    }
+    if (connectionState === "idle") {
+      const guided = !!walkthroughStates?.length;
+      return {
+        icon: guided ? (
+          <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />
+        ) : (
+          <Mic className="h-3.5 w-3.5" strokeWidth={2.5} />
+        ),
+        title: guided ? "Guided tour" : "Voice chat",
+        subtitle: guided ? "Tap the orb to begin" : "Tap the orb to talk",
+        pill: guided
+          ? "border-indigo-200/90 bg-gradient-to-br from-indigo-50 via-violet-50/80 to-white text-indigo-950 shadow-md shadow-indigo-100/35"
+          : "border-slate-200/90 bg-gradient-to-br from-slate-50 to-white text-slate-800 shadow-md shadow-slate-200/30",
+        iconWrap: guided
+          ? "bg-indigo-100 text-indigo-700 ring-2 ring-indigo-300/35"
+          : "bg-slate-100 text-slate-600 ring-2 ring-slate-200/50",
+        activity: null as ReactNode,
+      };
+    }
+    if (connectionState === "connected") {
+      if (speakingState === "listening") {
+        return {
+          icon: <AudioLines className="h-3.5 w-3.5" strokeWidth={2.5} />,
+          title: "Listening",
+          subtitle: "Speak when you're ready",
+          pill: "border-emerald-200/90 bg-gradient-to-br from-emerald-50 via-teal-50/70 to-white text-emerald-950 shadow-md shadow-emerald-100/40",
+          iconWrap:
+            "bg-emerald-100 text-emerald-700 ring-2 ring-emerald-400/45",
+          activity: (
+            <span className="flex h-3.5 items-end gap-0.5" aria-hidden>
+              <span className="h-1.5 w-0.5 animate-pulse rounded-sm bg-emerald-600/90 [animation-duration:1s]" />
+              <span className="h-2.5 w-0.5 animate-pulse rounded-sm bg-emerald-600/90 [animation-duration:1s] [animation-delay:140ms]" />
+              <span className="h-3.5 w-0.5 animate-pulse rounded-sm bg-emerald-600/90 [animation-duration:1s] [animation-delay:280ms]" />
+            </span>
+          ),
+        };
+      }
+      if (speakingState === "thinking") {
+        return {
+          icon: <Brain className="h-3.5 w-3.5" strokeWidth={2.5} />,
+          title: "Thinking",
+          subtitle: "Working on a response",
+          pill: "border-amber-200/90 bg-gradient-to-br from-amber-50 via-amber-50/50 to-orange-50/80 text-amber-950 shadow-md shadow-amber-100/35",
+          iconWrap:
+            "bg-amber-100 text-amber-700 ring-2 ring-amber-400/40 animate-pulse",
+          activity: (
+            <span className="flex gap-1">
+              <span className="h-1 w-1 rounded-full bg-amber-500 animate-bounce [animation-duration:1s]" />
+              <span className="h-1 w-1 rounded-full bg-amber-500 animate-bounce [animation-duration:1s] [animation-delay:150ms]" />
+              <span className="h-1 w-1 rounded-full bg-amber-500 animate-bounce [animation-duration:1s] [animation-delay:300ms]" />
+            </span>
+          ),
+        };
+      }
+      if (speakingState === "speaking") {
+        return {
+          icon: <Volume2 className="h-3.5 w-3.5" strokeWidth={2.5} />,
+          title: "Speaking",
+          subtitle: "Gemini is responding",
+          pill: "border-violet-200/90 bg-gradient-to-br from-violet-50 via-fuchsia-50/60 to-white text-violet-950 shadow-md shadow-violet-100/40",
+          iconWrap:
+            "bg-violet-100 text-violet-700 ring-2 ring-violet-400/45 shadow-sm",
+          activity: (
+            <span className="flex h-3.5 items-end gap-0.5" aria-hidden>
+              <span className="h-3.5 w-0.5 animate-pulse rounded-sm bg-violet-600/90 [animation-duration:0.75s]" />
+              <span className="h-2.5 w-0.5 animate-pulse rounded-sm bg-violet-600/90 [animation-duration:0.75s] [animation-delay:100ms]" />
+              <span className="h-1.5 w-0.5 animate-pulse rounded-sm bg-violet-600/90 [animation-duration:0.75s] [animation-delay:200ms]" />
+            </span>
+          ),
+        };
+      }
+      return {
+        icon: <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />,
+        title: "Live",
+        subtitle: "Session active",
+        pill: "border-sky-200/90 bg-gradient-to-br from-sky-50 to-white text-sky-950 shadow-md shadow-sky-100/30",
+        iconWrap: "bg-sky-100 text-sky-700 ring-2 ring-sky-300/40",
+        activity: null as ReactNode,
+      };
+    }
+    return {
+      icon: <Mic className="h-3.5 w-3.5 opacity-50" />,
+      title: "",
+      subtitle: "",
+      pill: "border-slate-200 bg-white/90 text-slate-600",
+      iconWrap: "bg-slate-100 text-slate-500",
+      activity: null as ReactNode,
+    };
+  })();
+
+  const rootPlacement =
+    placement === "viewport"
+      ? "fixed bottom-6 right-6 z-50"
+      : "relative";
 
   return (
-    <>
-      <button
-        onClick={handleToggle}
+    <div
+      className={cn(
+        rootPlacement,
+        "flex flex-col items-end gap-2 text-left",
+        className,
+      )}
+    >
+      <div
+        role="status"
+        aria-live="polite"
         className={cn(
-          "fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all hover:scale-105",
-          connectionState === "connected"
-            ? "bg-green-600 text-white animate-pulse"
-            : "bg-primary text-primary-foreground",
+          "flex max-w-[17rem] items-center gap-2.5 rounded-2xl border px-2.5 py-2 text-left shadow-sm backdrop-blur-md transition-all duration-300",
+          statusUi.pill,
         )}
-        title="Talk to your diagram"
       >
-        {connectionState === "connected" ? (
-          <Volume2 className="h-6 w-6" />
-        ) : (
-          <MessageCircle className="h-6 w-6" />
-        )}
-      </button>
-
-      {isOpen && (
-        <div
+        <span
           className={cn(
-            "fixed bottom-24 right-6 z-50 flex w-96 flex-col rounded-2xl border bg-white shadow-2xl overflow-hidden",
-            "max-h-[70vh]",
-            className,
+            "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl",
+            statusUi.iconWrap,
           )}
         >
-          <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-3">
-            <div className="flex items-center gap-2">
-              <div
-                className={cn(
-                  "h-2.5 w-2.5 rounded-full transition-colors",
-                  stateColors[speakingState],
-                )}
-              />
-              <span className="text-sm font-semibold text-slate-800">
-                {guidedMode ? "Guided Walkthrough" : "Ask about the diagram"}
+          {statusUi.icon}
+        </span>
+        <div className="min-w-0 flex-1">
+          {connectionState === "connected" && walkthroughStates?.length ? (
+            <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-[0.14em] text-indigo-600/95">
+              Guided
+            </span>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className="text-sm font-semibold leading-tight tracking-tight">
+              {statusUi.title}
+            </span>
+            {statusUi.activity}
+          </div>
+          {statusUi.subtitle ? (
+            <span className="mt-0.5 block text-[11px] font-medium leading-snug text-current/70">
+              {statusUi.subtitle}
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        {connectionState === "connected" &&
+          walkthroughStates &&
+          walkthroughStates.length > 0 &&
+          currentWalkthroughIndex !== undefined && (
+            <>
+              <button
+                type="button"
+                onClick={handleGuidedPrev}
+                disabled={
+                  currentWalkthroughIndex <= 0 || speakingState === "speaking"
+                }
+                className="rounded-full border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Previous step"
+              >
+                <ChevronLeft className="h-4 w-4 text-slate-700" />
+              </button>
+            </>
+          )}
+
+        <button
+          type="button"
+          onClick={handleOrbClick}
+          disabled={connectionState === "connecting"}
+          className={cn(
+            "flex h-[4.25rem] w-[4.25rem] shrink-0 items-center justify-center rounded-full border-0 bg-transparent p-0 shadow-none outline-none",
+            "transition-transform hover:scale-[1.04] active:scale-[0.98] disabled:opacity-70",
+            "focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:ring-offset-2",
+          )}
+          title={
+            connectionState === "connected"
+              ? "End voice session"
+              : walkthroughStates?.length
+                ? "Start guided diagram tour — Gemini Live"
+                : "Talk to your diagram — Gemini Live"
+          }
+        >
+          <GeminiLiveOrb
+            state={mapToOrbState(connectionState, speakingState)}
+            size={52}
+          />
+        </button>
+
+        {connectionState === "connected" &&
+          walkthroughStates &&
+          walkthroughStates.length > 0 &&
+          currentWalkthroughIndex !== undefined && (
+            <>
+              <button
+                type="button"
+                onClick={handleGuidedNext}
+                disabled={
+                  currentWalkthroughIndex >= walkthroughStates.length - 1 ||
+                  speakingState === "speaking"
+                }
+                className="rounded-full border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Next step"
+              >
+                <ChevronRight className="h-4 w-4 text-slate-700" />
+              </button>
+            </>
+          )}
+      </div>
+
+      {connectionState === "connected" &&
+        walkthroughStates &&
+        currentWalkthroughIndex !== undefined && (
+          <div className="w-full max-w-[16rem] rounded-xl border border-indigo-200/80 bg-indigo-50/90 px-2.5 py-2 text-xs text-indigo-900 shadow-sm backdrop-blur-sm">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="font-semibold">
+                Step {currentWalkthroughIndex + 1}/{walkthroughStates.length}
+              </span>
+              <span className="truncate text-indigo-600">
+                {walkthroughStates[currentWalkthroughIndex]?.title}
               </span>
             </div>
-            <button
-              onClick={handleToggle}
-              className="rounded-md p-1 hover:bg-slate-200 transition-colors"
-            >
-              <X className="h-4 w-4 text-slate-500" />
-            </button>
+            <div className="flex gap-0.5">
+              {walkthroughStates.map((_, i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    "h-1 flex-1 rounded-full transition-colors",
+                    i <= currentWalkthroughIndex
+                      ? "bg-indigo-500"
+                      : "bg-indigo-200",
+                  )}
+                />
+              ))}
+            </div>
           </div>
+        )}
 
-          <div className="flex items-center gap-2 border-b bg-slate-50/50 px-4 py-2">
-            <span className="text-xs text-slate-500">
-              {stateLabels[speakingState]}
-            </span>
-            {speakingState === "listening" && (
-              <div className="flex gap-0.5">
-                {[0, 1, 2].map((i) => (
-                  <div
-                    key={i}
-                    className="h-3 w-1 rounded-full bg-green-500"
-                    style={{
-                      animation: `pulse 1s ease-in-out ${i * 0.15}s infinite`,
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-            {speakingState === "speaking" && (
-              <div className="flex gap-0.5">
-                {[0, 1, 2, 3, 4].map((i) => (
-                  <div
-                    key={i}
-                    className="h-3 w-1 rounded-full bg-blue-500"
-                    style={{
-                      animation: `pulse 0.6s ease-in-out ${i * 0.1}s infinite`,
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
+      {error ? (
+        <div className="max-w-[16rem] rounded-lg border border-red-200 bg-red-50/95 px-2.5 py-1.5 text-[11px] text-red-800 shadow-sm backdrop-blur-sm">
+          {error}
+        </div>
+      ) : null}
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[200px] max-h-[400px]">
-            {connectionState === "idle" && transcript.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <Mic className="h-10 w-10 text-slate-300 mb-3" />
-                <p className="text-sm text-slate-500 font-medium">
-                  Voice chat with Gemini
-                </p>
-                <p className="text-xs text-slate-400 mt-1 max-w-[240px]">
-                  Ask questions about the diagram in real-time. Gemini can see
-                  what you&apos;re viewing and explain it.
-                </p>
-                {walkthroughStates && walkthroughStates.length > 0 && (
-                  <button
-                    onClick={startGuidedTour}
-                    className="mt-4 flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md hover:shadow-lg transition-all hover:scale-[1.02]"
-                  >
-                    <BookOpen className="h-4 w-4" />
-                    Start Guided Tour
-                  </button>
-                )}
-              </div>
-            )}
-
+      {transcript.length > 0 && (
+        <details className="w-full max-w-[min(100%,18rem)] rounded-xl border border-slate-200/90 bg-white/95 shadow-sm backdrop-blur-sm">
+          <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-slate-600">
+            Transcript ({transcript.length})
+          </summary>
+          <div className="max-h-[220px] space-y-2 overflow-y-auto border-t border-slate-100 px-3 py-2">
             {transcript.map((entry, i) => (
               <div
                 key={i}
@@ -647,7 +841,7 @@ export function LiveChat({
               >
                 <div
                   className={cn(
-                    "max-w-[85%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed",
+                    "max-w-[95%] rounded-2xl px-2.5 py-1.5 text-[11px] leading-relaxed",
                     entry.role === "user"
                       ? "bg-primary text-primary-foreground rounded-br-md"
                       : "bg-slate-100 text-slate-800 rounded-bl-md",
@@ -659,154 +853,23 @@ export function LiveChat({
             ))}
             <div ref={transcriptEndRef} />
           </div>
-
-          {error && (
-            <div className="mx-4 mb-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
-              {error}
-            </div>
-          )}
-
-          {connectionState === "connected" && guidedMode && walkthroughStates && currentWalkthroughIndex !== undefined && (
-            <div className="border-t px-3 py-2 bg-indigo-50/80">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-medium text-indigo-700">
-                  Step {currentWalkthroughIndex + 1} of {walkthroughStates.length}
-                </span>
-                <span className="text-xs text-indigo-500 truncate max-w-[180px]">
-                  {walkthroughStates[currentWalkthroughIndex]?.title}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleGuidedPrev}
-                  disabled={currentWalkthroughIndex <= 0 || speakingState === "speaking"}
-                  className="flex items-center gap-1 rounded-lg border border-indigo-200 bg-white px-2.5 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                  Prev
-                </button>
-                <div className="flex-1 flex gap-0.5">
-                  {walkthroughStates.map((_, i) => (
-                    <div
-                      key={i}
-                      className={cn(
-                        "h-1 flex-1 rounded-full transition-colors",
-                        i <= currentWalkthroughIndex
-                          ? "bg-indigo-500"
-                          : "bg-indigo-200",
-                      )}
-                    />
-                  ))}
-                </div>
-                <button
-                  onClick={handleGuidedNext}
-                  disabled={currentWalkthroughIndex >= walkthroughStates.length - 1 || speakingState === "speaking"}
-                  className="flex items-center gap-1 rounded-lg border border-indigo-200 bg-white px-2.5 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  Next
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {connectionState === "connected" && (
-            <div className="border-t px-3 py-2 flex flex-wrap gap-1.5">
-              {(guidedMode
-                ? [
-                    "Explain this simpler",
-                    "Give me an example",
-                    "Why does this matter?",
-                  ]
-                : [
-                    "Explain this simpler",
-                    "What happens next?",
-                    "Why is this important?",
-                    "Give me an example",
-                  ]
-              ).map((q) => (
-                <button
-                  key={q}
-                  onClick={() => sendTextMessage(q)}
-                  className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded-full transition-colors"
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="border-t px-4 py-3 bg-slate-50">
-            {connectionState === "idle" && !guidedMode && walkthroughStates && walkthroughStates.length > 0 ? (
-              <div className="flex gap-2">
-                <button
-                  onClick={handleConnect}
-                  className="flex-1 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
-                >
-                  <Mic className="h-4 w-4" />
-                  Free Talk
-                </button>
-                <button
-                  onClick={startGuidedTour}
-                  className="flex-1 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold bg-gradient-to-r from-indigo-500 to-purple-600 text-white hover:shadow-md transition-all"
-                >
-                  <BookOpen className="h-4 w-4" />
-                  Guided Tour
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => {
-                  if (connectionState === "connected") {
-                    setGuidedMode(false);
-                    disconnect();
-                  } else {
-                    connect();
-                  }
-                }}
-                disabled={connectionState === "connecting"}
-                className={cn(
-                  "w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all",
-                  connectionState === "connected"
-                    ? "bg-red-100 text-red-700 hover:bg-red-200"
-                    : connectionState === "connecting"
-                      ? "bg-slate-200 text-slate-400 cursor-wait"
-                      : "bg-primary text-primary-foreground hover:bg-primary/90",
-                )}
-              >
-                {connectionState === "connecting" ? (
-                  <>
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                    Connecting...
-                  </>
-                ) : connectionState === "connected" ? (
-                  <>
-                    <MicOff className="h-4 w-4" />
-                    End {guidedMode ? "Tour" : "Conversation"}
-                  </>
-                ) : (
-                  <>
-                    <Mic className="h-4 w-4" />
-                    Start Talking
-                  </>
-                )}
-              </button>
-            )}
-          </div>
-        </div>
+        </details>
       )}
 
-      <style jsx global>{`
-        @keyframes pulse {
-          0%,
-          100% {
-            transform: scaleY(0.4);
-          }
-          50% {
-            transform: scaleY(1);
-          }
-        }
-      `}</style>
-    </>
+      {connectionState === "connecting" && (
+        <p className="text-[11px] text-slate-500">Preparing microphone…</p>
+      )}
+
+      {connectionState === "connected" && (
+        <button
+          type="button"
+          onClick={() => disconnect()}
+          className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50/95 px-3 py-1 text-[11px] font-medium text-red-800 shadow-sm backdrop-blur-sm hover:bg-red-100/90"
+        >
+          <MicOff className="h-3 w-3" />
+          End {walkthroughStates?.length ? "tour" : "session"}
+        </button>
+      )}
+    </div>
   );
 }

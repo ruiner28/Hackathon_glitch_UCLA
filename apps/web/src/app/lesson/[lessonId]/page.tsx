@@ -191,6 +191,16 @@ function LessonPageContent({ lessonId }: { lessonId: string }) {
               controlledStateIndex={guidedStateIndex}
               onStateChange={setGuidedStateIndex}
               onComponentClick={handleComponentClick}
+              overlay={
+                <LiveChat
+                  lessonId={lessonId}
+                  placement="diagram"
+                  walkthroughStates={walkthroughStates}
+                  currentWalkthroughIndex={guidedStateIndex}
+                  onAdvanceState={setGuidedStateIndex}
+                  componentQuestion={componentQuestion}
+                />
+              }
             />
           ) : (
             <div className="aspect-video rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center mb-6 shadow-lg overflow-hidden relative">
@@ -310,17 +320,6 @@ function LessonPageContent({ lessonId }: { lessonId: string }) {
             </div>
           )}
         </div>
-
-        {/* Gemini Live Chat — Floating */}
-        {hasDiagram && (
-          <LiveChat
-            lessonId={lessonId}
-            walkthroughStates={walkthroughStates}
-            currentWalkthroughIndex={guidedStateIndex}
-            onAdvanceState={setGuidedStateIndex}
-            componentQuestion={componentQuestion}
-          />
-        )}
       </main>
     </>
   );

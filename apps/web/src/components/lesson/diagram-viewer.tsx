@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
@@ -30,6 +31,8 @@ interface DiagramViewerProps {
   onStateChange?: (index: number) => void;
   onDataLoaded?: (data: DiagramData) => void;
   onComponentClick?: (info: ComponentClickInfo) => void;
+  /** Rendered over the diagram canvas (e.g. Gemini Live orb) so it stays visible in fullscreen. */
+  overlay?: ReactNode;
 }
 
 export function DiagramViewer({
@@ -39,6 +42,7 @@ export function DiagramViewer({
   onStateChange,
   onDataLoaded,
   onComponentClick,
+  overlay,
 }: DiagramViewerProps) {
   const [data, setData] = useState<DiagramData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -247,7 +251,7 @@ export function DiagramViewer({
 
         <button
           onClick={toggleFullscreen}
-          className="absolute top-3 right-3 p-1.5 rounded-md bg-white/80 hover:bg-white border shadow-sm transition-colors"
+          className="absolute top-3 right-3 p-1.5 rounded-md bg-white/80 hover:bg-white border shadow-sm transition-colors z-10"
           title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
         >
           {isFullscreen ? (
@@ -256,6 +260,12 @@ export function DiagramViewer({
             <Maximize2 className="h-4 w-4" />
           )}
         </button>
+
+        {overlay ? (
+          <div className="pointer-events-none absolute bottom-4 right-4 z-[60] flex max-w-[min(100%,20rem)] flex-col items-end gap-2">
+            <div className="pointer-events-auto">{overlay}</div>
+          </div>
+        ) : null}
       </div>
 
       {currentState && (
