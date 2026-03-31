@@ -49,7 +49,7 @@ export function SceneCard({ scene, isSelected, onClick }: SceneCardProps) {
     : null;
   const thumb =
     scene.preview_image_url &&
-    `${getApiBase().replace(/\/$/, "")}${scene.preview_image_url.startsWith("/") ? "" : "/"}${scene.preview_image_url}`;
+    `${getApiBase().replace(/\/$/, "")}${scene.preview_image_url.startsWith("/") ? "" : "/"}${scene.preview_image_url}?v=${encodeURIComponent(scene.updated_at)}`;
   const useVeo = sceneWillUseVeo(scene);
 
   return (

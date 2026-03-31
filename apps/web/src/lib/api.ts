@@ -86,6 +86,7 @@ async function request<T>(
   let res: Response;
   try {
     res = await fetch(`${base}${path}`, {
+      cache: "no-store",
       headers: {
         "Content-Type": "application/json",
         ...options?.headers,
@@ -120,6 +121,7 @@ export async function uploadFile(file: File): Promise<{ id: string; title: strin
   try {
     res = await fetch(`${base}/api/uploads`, {
       method: "POST",
+      cache: "no-store",
       body: formData,
     });
   } catch (err) {
@@ -447,6 +449,7 @@ export async function checkSubtitlesReady(lessonId: string): Promise<boolean> {
   try {
     const res = await fetch(`${getApiBase()}/api/lessons/${lessonId}/subtitles`, {
       method: "HEAD",
+      cache: "no-store",
     });
     return res.ok;
   } catch {
@@ -458,6 +461,7 @@ export async function checkVideoReady(lessonId: string): Promise<boolean> {
   try {
     const res = await fetch(`${getApiBase()}/api/lessons/${lessonId}/video`, {
       method: "HEAD",
+      cache: "no-store",
     });
     return res.ok;
   } catch {
@@ -467,7 +471,7 @@ export async function checkVideoReady(lessonId: string): Promise<boolean> {
 
 export async function downloadLesson(lessonId: string) {
   const url = `${getApiBase()}/api/lessons/${lessonId}/download`;
-  const res = await fetch(url);
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {
     throw new Error(`Download failed: ${res.status}`);
   }

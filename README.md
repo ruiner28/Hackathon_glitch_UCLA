@@ -134,10 +134,10 @@ Use **`pnpm dev:web`** if you only need the UI and will point it at another API 
 
 ```bash
 cd apps/web
-# Optional: create .env.local if your API is not on localhost:8000
-echo 'NEXT_PUBLIC_API_URL=http://localhost:8000' > .env.local
 pnpm dev
 ```
+
+The app calls `/api/*` on the same origin; Next.js proxies to FastAPI on port 8000 (see `apps/web/next.config.ts`). Set `NEXT_PUBLIC_API_URL` only if the API is hosted on a different origin.
 
 Open **http://localhost:3000**.
 

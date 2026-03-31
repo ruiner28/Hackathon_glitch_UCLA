@@ -28,14 +28,9 @@ import {
   Sparkles,
 } from "lucide-react";
 
-export default function LessonPage({
-  params,
-}: {
-  params: Promise<{ lessonId: string }>;
-}) {
-  const { lessonId } = use(params);
+function LessonPageContent({ lessonId }: { lessonId: string }) {
   const router = useRouter();
-  const { setLesson, setScenes } = useLessonStore();
+  const { setLesson, setScenes, reset: resetLessonStore } = useLessonStore();
 
   const [isLoading, setIsLoading] = useState(true);
   const [lessonData, setLessonData] = useState<Lesson | null>(null);
@@ -57,12 +52,22 @@ export default function LessonPage({
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     async function load() {
+      setIsLoading(true);
+      setLessonData(null);
+      setLocalScenes([]);
+      setHasDiagram(false);
+      setWalkthroughStates([]);
+      setGuidedStateIndex(0);
+      setSelectedSceneIdx(null);
+      resetLessonStore();
       try {
         const [lesson, lessonScenes] = await Promise.all([
           getLesson(lessonId),
           getLessonScenes(lessonId),
         ]);
+        if (cancelled) return;
         const typedLesson = lesson as unknown as Lesson;
         const typedScenes = lessonScenes as unknown as Scene[];
         setLessonData(typedLesson);
@@ -72,20 +77,26 @@ export default function LessonPage({
 
         getDiagramData(lessonId)
           .then((d) => {
+            if (cancelled) return;
             setHasDiagram(true);
             if (d.walkthrough_states?.length) {
               setWalkthroughStates(d.walkthrough_states);
             }
           })
-          .catch(() => setHasDiagram(false));
+          .catch(() => {
+            if (!cancelled) setHasDiagram(false);
+          });
       } catch (err) {
         console.error("Failed to load lesson:", err);
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     }
     load();
-  }, [lessonId, setLesson, setScenes]);
+    return () => {
+      cancelled = true;
+    };
+  }, [lessonId, setLesson, setScenes, resetLessonStore]);
 
   const handlePrimaryVideo = useCallback(async () => {
     setIsRendering(true);
@@ -186,7 +197,8 @@ export default function LessonPage({
               {scenes[0]?.preview_image_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={`${getApiBase().replace(/\/$/, "")}${scenes[0].preview_image_url}`}
+                  key={`${scenes[0].id}-${scenes[0].updated_at}`}
+                  src={`${getApiBase().replace(/\/$/, "")}${scenes[0].preview_image_url.startsWith("/") ? "" : "/"}${scenes[0].preview_image_url}?v=${encodeURIComponent(scenes[0].updated_at)}`}
                   alt=""
                   className="absolute inset-0 h-full w-full object-cover opacity-60"
                   onError={(e) => {
@@ -252,7 +264,8 @@ export default function LessonPage({
                       {scene.preview_image_url && (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
-                          src={`${getApiBase().replace(/\/$/, "")}${scene.preview_image_url}`}
+                          key={`${scene.id}-${scene.updated_at}`}
+                          src={`${getApiBase().replace(/\/$/, "")}${scene.preview_image_url.startsWith("/") ? "" : "/"}${scene.preview_image_url}?v=${encodeURIComponent(scene.updated_at)}`}
                           alt=""
                           className="h-16 w-28 shrink-0 rounded-lg object-cover bg-slate-100"
                           onError={(e) => {
@@ -311,4 +324,13 @@ export default function LessonPage({
       </main>
     </>
   );
+}
+
+export default function LessonPage({
+  params,
+}: {
+  params: Promise<{ lessonId: string }>;
+}) {
+  const { lessonId } = use(params);
+  return <LessonPageContent key={lessonId} lessonId={lessonId} />;
 }
