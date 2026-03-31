@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = "gemini-2.0-flash"
     # Veo text-to-video model id (Gemini API). Override if Google ships newer IDs.
     VEO_MODEL: str = "veo-2.0-generate-001"
+    # Generate Animation: skip live Veo when offline assets exist (see demo_cache.py).
+    VEO_OFFLINE_USE_DEMO_CACHE: bool = True
+    # If true and storage/output/{lessonId}/lesson.mp4 already exists, reuse it (no Veo).
+    VEO_REUSE_EXISTING_OUTPUT: bool = False
 
     GCS_BUCKET_NAME: str = ""
     GOOGLE_PROJECT_ID: str = ""
@@ -62,10 +66,48 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
     API_URL: str = "http://localhost:8000"
 
+    # Google OAuth (Sign in with Google). Redirect URI must match Google Cloud Console
+    # exactly (character-for-character) and use the Next origin + /api/auth/callback/google.
+    # Aliases match common .env names from Next.js / other templates.
+    GOOGLE_OAUTH_CLIENT_ID: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "GOOGLE_OAUTH_CLIENT_ID",
+            "NEXT_PUBLIC_GOOGLE_CLIENT_ID",
+        ),
+    )
+    GOOGLE_OAUTH_CLIENT_SECRET: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "GOOGLE_OAUTH_CLIENT_SECRET",
+            "AUTH_GOOGLE_SECRET",
+            "GOOGLE_CLIENT_SECRET",
+        ),
+    )
+    GOOGLE_OAUTH_REDIRECT_URI: str = "http://localhost:3000/api/auth/callback/google"
+
+    SESSION_COOKIE_NAME: str = "vc_session"
+    SESSION_MAX_AGE_SEC: int = 60 * 60 * 24 * 7  # 7 days
+    OAUTH_STATE_COOKIE_NAME: str = "oauth_state"
+    OAUTH_STATE_MAX_AGE_SEC: int = 600
+    OAUTH_NEXT_COOKIE_NAME: str = "oauth_next"
+
     @field_validator("GEMINI_API_KEY", mode="before")
     @classmethod
     def normalize_gemini_api_key(cls, v: object) -> str:
         """Strip whitespace and optional surrounding quotes from .env values."""
+        if v is None:
+            return ""
+        s = str(v).strip()
+        if len(s) >= 2 and (
+            (s[0] == s[-1] == '"') or (s[0] == s[-1] == "'")
+        ):
+            s = s[1:-1].strip()
+        return s
+
+    @field_validator("GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", mode="before")
+    @classmethod
+    def strip_oauth_secrets(cls, v: object) -> str:
         if v is None:
             return ""
         s = str(v).strip()

@@ -1,3 +1,4 @@
+from app.models.user import AuthSession, User
 from app.models.source_document import SourceDocument, SourceDocumentType, SourceDocumentStatus
 from app.models.source_fragment import SourceFragment, FragmentKind
 from app.models.lesson import Lesson, LessonDomain, LessonStylePreset, LessonStatus
@@ -8,6 +9,8 @@ from app.models.render_job import RenderJob, RenderJobStatus
 from app.models.evaluation_report import EvaluationReport
 
 __all__ = [
+    "User",
+    "AuthSession",
     "SourceDocument", "SourceDocumentType", "SourceDocumentStatus",
     "SourceFragment", "FragmentKind",
     "Lesson", "LessonDomain", "LessonStylePreset", "LessonStatus",

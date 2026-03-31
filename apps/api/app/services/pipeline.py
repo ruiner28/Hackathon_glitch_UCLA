@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import shutil
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -31,6 +32,7 @@ from app.providers.factory import (
     get_video_provider,
 )
 from app.services.assembly.service import AssemblyService
+from app.services import demo_cache as demo_cache_service
 from app.services.compilation.service import CompilationService
 from app.services.diagram.service import DiagramService
 from app.services.evaluation.service import EvaluationService
@@ -1167,37 +1169,71 @@ class LessonPipeline:
         walkthrough = plan.walkthrough_states_json or []
         topic = (lesson.input_topic or lesson.title or lesson.domain.value or "CS topic").strip()
 
-        veo_render = VeoRenderService(
-            self.video_provider,
-            self.music_provider,
-            self.storage,
-            self.diagram,
-            self.tts,
-        )
-
-        video_url = ""
-        try:
-            video_url = await veo_render.generate_animation(
-                str(lesson.id),
-                topic,
-                diagram_spec,
-                walkthrough if isinstance(walkthrough, list) else [],
-            )
-        except Exception as exc:
-            logger.exception("Pipeline.run_veo_render failed lesson=%s", lesson.id)
-            job.status = RenderJobStatus.failed
-            job.error_message = str(exc)[:1900]
-            job.completed_at = datetime.now(timezone.utc)
-            lesson.status = LessonStatus.error
-            await db.flush()
-            raise
-
+        settings = get_settings()
         out_mp4 = (
-            Path(get_settings().LOCAL_STORAGE_PATH).resolve()
+            Path(settings.LOCAL_STORAGE_PATH).resolve()
             / "output"
             / str(lesson.id)
             / "lesson.mp4"
         )
+        video_url = ""
+
+        # Offline paths (no Gemini/Veo): restored backup or demo_cache/<slug>/output/lesson.mp4
+        if settings.VEO_REUSE_EXISTING_OUTPUT and out_mp4.is_file() and out_mp4.stat().st_size > 512:
+            video_url = await self.storage.put_file(
+                f"output/{lesson.id}/lesson.mp4",
+                out_mp4.read_bytes(),
+                "video/mp4",
+            )
+            logger.info(
+                "Pipeline.run_veo_render: reused existing lesson.mp4 (VEO_REUSE_EXISTING_OUTPUT) lesson=%s",
+                lesson.id,
+            )
+        elif settings.VEO_OFFLINE_USE_DEMO_CACHE:
+            slug = demo_cache_service.resolve_demo_cache_slug(lesson.input_topic)
+            cached = (
+                demo_cache_service.cached_final_video_path(slug) if slug else None
+            )
+            if cached is not None:
+                out_mp4.parent.mkdir(parents=True, exist_ok=True)
+                video_url = await self.storage.put_file(
+                    f"output/{lesson.id}/lesson.mp4",
+                    cached.read_bytes(),
+                    "video/mp4",
+                )
+                sub = demo_cache_service.cached_subtitles_path(slug)
+                if sub is not None:
+                    shutil.copy2(sub, out_mp4.parent / "subtitles.srt")
+                logger.info(
+                    "Pipeline.run_veo_render: used offline demo_cache (slug=%s) lesson=%s",
+                    slug,
+                    lesson.id,
+                )
+
+        if not video_url:
+            veo_render = VeoRenderService(
+                self.video_provider,
+                self.music_provider,
+                self.storage,
+                self.diagram,
+                self.tts,
+            )
+            try:
+                video_url = await veo_render.generate_animation(
+                    str(lesson.id),
+                    topic,
+                    diagram_spec,
+                    walkthrough if isinstance(walkthrough, list) else [],
+                )
+            except Exception as exc:
+                logger.exception("Pipeline.run_veo_render failed lesson=%s", lesson.id)
+                job.status = RenderJobStatus.failed
+                job.error_message = str(exc)[:1900]
+                job.completed_at = datetime.now(timezone.utc)
+                lesson.status = LessonStatus.error
+                await db.flush()
+                raise
+
         if not (out_mp4.is_file() and out_mp4.stat().st_size > 512):
             job.status = RenderJobStatus.failed
             job.error_message = "Veo animation completed but lesson.mp4 is missing or empty."

@@ -87,6 +87,7 @@ async function request<T>(
   try {
     res = await fetch(`${base}${path}`, {
       cache: "no-store",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...options?.headers,
@@ -122,6 +123,7 @@ export async function uploadFile(file: File): Promise<{ id: string; title: strin
     res = await fetch(`${base}/api/uploads`, {
       method: "POST",
       cache: "no-store",
+      credentials: "include",
       body: formData,
     });
   } catch (err) {
@@ -543,4 +545,46 @@ export async function triggerGenerateDiagram(lessonId: string) {
   }>(`/api/lessons/${lessonId}/generate-diagram`, {
     method: "POST",
   });
+}
+
+/** Signed-in user from session cookie (same-origin /api proxy). */
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string | null;
+  picture_url: string | null;
+  provider: string;
+}
+
+export async function fetchAuthMe(): Promise<AuthUser | null> {
+  const base = getApiBase();
+  const res = await fetch(`${base}/api/auth/me`, {
+    cache: "no-store",
+    credentials: "include",
+  });
+  if (res.status === 401) return null;
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(parseApiErrorBody(t));
+  }
+  return res.json() as Promise<AuthUser>;
+}
+
+export async function authLogout(): Promise<void> {
+  const base = getApiBase();
+  const res = await fetch(`${base}/api/auth/logout`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(parseApiErrorBody(t));
+  }
+}
+
+/** Browser-only: same-origin path to start Google OAuth (proxied to FastAPI). */
+export function getGoogleLoginHref(nextPath: string): string {
+  const q = nextPath && nextPath !== "/" ? `?next=${encodeURIComponent(nextPath)}` : "";
+  return `/api/auth/google${q}`;
 }

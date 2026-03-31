@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Layers, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AuthControls } from "@/components/layout/auth-controls";
 
 export function Header() {
   const pathname = usePathname();
@@ -18,7 +19,8 @@ export function Header() {
           <span className="text-lg font-bold text-slate-900">VisualCS</span>
         </Link>
 
-        <nav className="flex items-center gap-1">
+        <nav className="flex items-center gap-2">
+          <AuthControls />
           <Link
             href="/"
             className={cn(
