@@ -108,31 +108,32 @@ export default function ProcessingPage({
   return (
     <>
       <Header />
-      <main className="flex-1 bg-slate-50 min-h-screen">
-        <div className="max-w-md mx-auto px-6 py-16">
+      <main className="min-h-screen flex-1 bg-[hsl(var(--page-bg))]">
+        <div className="mx-auto max-w-md px-6 py-16 sm:py-20">
           <div className="mb-8 text-center">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-white border border-slate-200 shadow-sm">
+            <p className="section-label mb-4">Pipeline</p>
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
               {isComplete ? (
-                <CheckCircle2 className="h-7 w-7 text-green-500" />
+                <CheckCircle2 className="h-8 w-8 text-emerald-600" />
               ) : hasError ? (
-                <AlertCircle className="h-7 w-7 text-destructive" />
+                <AlertCircle className="h-8 w-8 text-destructive" />
               ) : (
-                <Loader2 className="h-7 w-7 animate-spin text-primary" />
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
               )}
             </div>
-            <h1 className="text-xl font-bold text-slate-900">
+            <h1 className="text-xl font-semibold tracking-tight text-slate-900">
               {isComplete
                 ? "Ready!"
                 : hasError
                   ? "Something went wrong"
                   : "Building your lesson"}
             </h1>
-            <p className="mt-1.5 text-sm text-slate-400">
+            <p className="mt-2 text-sm text-slate-600">
               {processingStatus.message}
             </p>
           </div>
 
-          <Card className="shadow-sm border-slate-200">
+          <Card className="border-slate-200/90 shadow-sm ring-1 ring-slate-900/[0.03]">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm font-medium text-slate-700">

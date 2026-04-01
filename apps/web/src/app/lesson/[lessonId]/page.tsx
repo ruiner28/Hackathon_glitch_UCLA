@@ -117,10 +117,10 @@ function LessonPageContent({ lessonId }: { lessonId: string }) {
     return (
       <>
         <Header />
-        <main className="flex flex-1 items-center justify-center min-h-screen bg-slate-50">
+        <main className="flex min-h-screen flex-1 items-center justify-center bg-[hsl(var(--page-bg))]">
           <div className="flex flex-col items-center gap-3">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <p className="text-sm text-muted-foreground">Loading lesson...</p>
+            <p className="text-sm text-slate-500">Loading lesson…</p>
           </div>
         </main>
       </>
@@ -133,28 +133,28 @@ function LessonPageContent({ lessonId }: { lessonId: string }) {
   return (
     <>
       <Header />
-      <main className="flex-1 bg-slate-50 min-h-screen">
+      <main className="min-h-screen flex-1 bg-[hsl(var(--page-bg))]">
         {/* Lesson Header */}
-        <div className="border-b bg-white">
-          <div className="max-w-6xl mx-auto px-6 py-5">
+        <div className="border-b border-slate-200/80 bg-white/90 shadow-[0_1px_0_0_rgba(15,23,42,0.04)] backdrop-blur-sm">
+          <div className="mx-auto max-w-6xl px-6 py-5 sm:px-8">
             <div className="flex items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-primary/70 uppercase tracking-wider mb-1">
+              <div className="min-w-0 flex-1">
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary/80">
                   {lessonData?.domain?.replace(/_/g, " ") || "CS Concepts"}
                 </p>
-                <h1 className="text-2xl font-bold tracking-tight text-slate-900 truncate">
+                <h1 className="truncate text-2xl font-semibold tracking-tight text-slate-900">
                   {lessonData?.title || "Untitled Lesson"}
                 </h1>
                 {lessonData?.summary && (
-                  <p className="mt-1.5 text-sm text-slate-500 line-clamp-2 max-w-2xl">
+                  <p className="mt-1.5 line-clamp-2 max-w-2xl text-sm text-slate-600">
                     {lessonData.summary}
                   </p>
                 )}
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex shrink-0 items-center gap-2">
                 <button
                   onClick={() => router.push(`/lesson/${lessonId}/output`)}
-                  className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-200/90 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
                 >
                   <Download className="h-3.5 w-3.5" />
                   Export
@@ -167,7 +167,7 @@ function LessonPageContent({ lessonId }: { lessonId: string }) {
                       ? "Generate a multi-clip Veo animation with Lyria music"
                       : "Render slideshow video with FFmpeg"
                   }
-                  className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary/90 transition-colors disabled:opacity-50"
+                  className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-50"
                 >
                   {isRendering ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -182,7 +182,7 @@ function LessonPageContent({ lessonId }: { lessonId: string }) {
         </div>
 
         {/* Main Content */}
-        <div className="max-w-6xl mx-auto px-6 py-6">
+        <div className="mx-auto max-w-6xl px-6 py-8 sm:px-8">
           {/* Interactive Diagram — Primary Experience */}
           {hasDiagram ? (
             <DiagramViewer
@@ -203,7 +203,7 @@ function LessonPageContent({ lessonId }: { lessonId: string }) {
               }
             />
           ) : (
-            <div className="aspect-video rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center mb-6 shadow-lg overflow-hidden relative">
+            <div className="relative mb-6 flex aspect-video items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-950 shadow-lg ring-1 ring-slate-900/10">
               {scenes[0]?.preview_image_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -233,12 +233,12 @@ function LessonPageContent({ lessonId }: { lessonId: string }) {
           {/* Scenes Overview */}
           {scenes.length > 0 && (
             <div>
-              <div className="flex items-center gap-2 mb-4">
+              <div className="mb-4 flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-primary" />
-                <h2 className="text-lg font-semibold text-slate-900">
+                <h2 className="text-lg font-semibold tracking-tight text-slate-900">
                   Lesson Scenes
                 </h2>
-                <span className="text-sm text-slate-400">
+                <span className="text-sm text-slate-500">
                   {scenes.length} sections
                 </span>
               </div>
@@ -252,10 +252,10 @@ function LessonPageContent({ lessonId }: { lessonId: string }) {
                         selectedSceneIdx === idx ? null : idx,
                       )
                     }
-                    className={`w-full text-left rounded-xl border bg-white p-4 transition-all hover:shadow-md ${
+                    className={`w-full rounded-xl border bg-white p-4 text-left shadow-sm transition-all hover:shadow-md ${
                       selectedSceneIdx === idx
-                        ? "border-primary/30 ring-1 ring-primary/10 shadow-sm"
-                        : "border-slate-200 hover:border-slate-300"
+                        ? "border-primary/35 ring-1 ring-primary/15 shadow-md"
+                        : "border-slate-200/90 hover:border-slate-300"
                     }`}
                   >
                     <div className="flex items-start gap-3">

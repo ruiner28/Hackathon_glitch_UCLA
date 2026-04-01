@@ -43,7 +43,12 @@ export function AuthControls() {
 
   if (!user) {
     return (
-      <Button variant="outline" size="sm" asChild className="gap-1.5">
+      <Button
+        variant="outline"
+        size="sm"
+        asChild
+        className="gap-1.5 border-slate-200/90 font-medium shadow-sm"
+      >
         <Link href="/login">
           <LogIn className="h-3.5 w-3.5" />
           Sign in
@@ -55,7 +60,7 @@ export function AuthControls() {
   return (
     <div className="flex items-center gap-2">
       <span
-        className="hidden max-w-[10rem] truncate text-xs text-slate-600 sm:inline"
+        className="hidden max-w-[11rem] truncate text-xs font-medium text-slate-600 sm:inline"
         title={user.email}
       >
         {user.name || user.email}
@@ -63,7 +68,7 @@ export function AuthControls() {
       <Button
         variant="ghost"
         size="sm"
-        className="gap-1.5 text-slate-600"
+        className="gap-1.5 font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
         disabled={busy}
         onClick={() => void logout()}
       >

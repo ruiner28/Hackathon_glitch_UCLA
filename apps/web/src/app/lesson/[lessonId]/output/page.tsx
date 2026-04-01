@@ -224,8 +224,9 @@ export default function OutputPage({
     return (
       <>
         <Header />
-        <main className="flex flex-1 items-center justify-center min-h-screen">
+        <main className="flex min-h-screen flex-1 flex-col items-center justify-center gap-3 bg-[hsl(var(--page-bg))]">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm text-slate-500">Loading export…</p>
         </main>
       </>
     );
@@ -237,13 +238,13 @@ export default function OutputPage({
   return (
     <>
       <Header />
-      <main className="flex-1 bg-gradient-to-b from-background to-muted/30">
-        <div className="container py-8">
-          <div className="mx-auto max-w-5xl">
+      <main className="flex-1 bg-[hsl(var(--page-bg))] pb-16">
+        <div className="container py-8 sm:py-10">
+          <div className="mx-auto max-w-5xl px-1 sm:px-0">
             <Button
               variant="ghost"
               size="sm"
-              className="mb-4 -ml-2"
+              className="-ml-1 mb-6 text-slate-600 hover:text-slate-900"
               onClick={() => router.push(`/lesson/${lessonId}`)}
             >
               <ArrowLeft className="mr-1.5 h-4 w-4" />
@@ -254,21 +255,24 @@ export default function OutputPage({
             <div className="mb-8">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1">
-                  <Badge variant="outline" className="mb-2 capitalize text-xs">
+                  <Badge
+                    variant="outline"
+                    className="mb-3 border-slate-200 capitalize text-xs font-medium text-slate-600"
+                  >
                     {lessonDomain.replace(/_/g, " ")}
                   </Badge>
-                  <h1 className="text-3xl font-bold tracking-tight">
+                  <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
                     {lessonTitle}
                   </h1>
                   {lessonSummary && (
-                    <p className="mt-2 text-muted-foreground max-w-2xl leading-relaxed">
+                    <p className="mt-2 max-w-2xl leading-relaxed text-slate-600">
                       {lessonSummary}
                     </p>
                   )}
                 </div>
               </div>
 
-              <div className="mt-4 flex items-center gap-5 text-sm text-muted-foreground">
+              <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-500">
                 <span className="flex items-center gap-1.5">
                   <Film className="h-4 w-4 text-primary/70" />
                   {sceneCount} scenes

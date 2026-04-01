@@ -153,18 +153,19 @@ function NewLessonContent() {
   return (
     <>
       <Header />
-      <main className="flex-1 bg-slate-50 min-h-screen">
-        <div className="max-w-lg mx-auto px-6 py-12">
+      <main className="min-h-screen flex-1 bg-[hsl(var(--page-bg))]">
+        <div className="mx-auto max-w-xl px-6 py-12 sm:py-16">
           <div className="mb-8 text-center">
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+            <p className="section-label mb-2">Create</p>
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
               New Deep Dive
             </h1>
-            <p className="mt-1.5 text-sm text-slate-400">
+            <p className="mt-2 text-sm text-slate-600">
               Enter a CS topic or upload a paper to generate an interactive lesson
             </p>
           </div>
 
-          <Card className="shadow-sm border-slate-200">
+          <Card className="border-slate-200/90 shadow-sm ring-1 ring-slate-900/[0.03]">
             <CardContent className="pt-6">
               <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList className="grid w-full grid-cols-2 mb-6">
@@ -322,8 +323,9 @@ export default function NewLessonPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-slate-50">
+        <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-[hsl(var(--page-bg))]">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm text-slate-500">Loading…</p>
         </div>
       }
     >

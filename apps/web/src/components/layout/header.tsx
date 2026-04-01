@@ -10,24 +10,29 @@ export function Header() {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-slate-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80">
-      <div className="max-w-6xl mx-auto px-6 flex h-14 items-center justify-between">
-        <Link href="/" className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Layers className="h-3.5 w-3.5" />
+    <header className="sticky top-0 z-50 w-full border-b border-slate-200/80 bg-white/85 shadow-[0_1px_0_0_rgba(15,23,42,0.04)] backdrop-blur-md supports-[backdrop-filter]:bg-white/75">
+      <div className="mx-auto flex h-[3.25rem] max-w-6xl items-center justify-between px-6 sm:px-8">
+        <Link
+          href="/"
+          className="flex items-center gap-2.5 transition-opacity hover:opacity-90"
+        >
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm ring-1 ring-primary/10">
+            <Layers className="h-4 w-4" />
           </div>
-          <span className="text-lg font-bold text-slate-900">VisualCS</span>
+          <span className="text-[15px] font-semibold tracking-tight text-slate-900">
+            VisualCS
+          </span>
         </Link>
 
-        <nav className="flex items-center gap-2">
+        <nav className="flex items-center gap-1">
           <AuthControls />
           <Link
             href="/"
             className={cn(
-              "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+              "rounded-lg px-3 py-2 text-sm font-medium transition-colors",
               pathname === "/"
-                ? "text-slate-900 bg-slate-100"
-                : "text-slate-500 hover:text-slate-700 hover:bg-slate-50",
+                ? "bg-slate-100 text-slate-900"
+                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
             )}
           >
             Home
@@ -35,10 +40,10 @@ export function Header() {
           <Link
             href="/new"
             className={cn(
-              "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+              "flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
               pathname === "/new"
-                ? "text-slate-900 bg-slate-100"
-                : "text-slate-500 hover:text-slate-700 hover:bg-slate-50",
+                ? "bg-slate-100 text-slate-900"
+                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
             )}
           >
             <Plus className="h-3.5 w-3.5" />
