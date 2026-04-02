@@ -1,4 +1,4 @@
-# VisualCS API Reference
+# VisualCS API Reference (Read Everything once)
 
 Base URL (local): `http://localhost:8000`
 
